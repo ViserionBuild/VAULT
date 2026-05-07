@@ -1,4 +1,5 @@
 const express = require('express')
+const crypto = require('node:crypto')
 const cors = require('cors')
 const helmet = require('helmet')
 const cookieParser = require('cookie-parser')
@@ -38,6 +39,7 @@ function createApp(options = {}) {
   const jwtSecret = options.jwtSecret ?? process.env.JWT_SECRET ?? 'development-jwt-secret'
   const refreshTokenSecret =
     options.refreshTokenSecret ?? process.env.JWT_REFRESH_SECRET ?? 'development-refresh-secret'
+  const cookieEncryptionSecret = process.env.COOKIE_ENCRYPTION_SECRET ?? refreshTokenSecret
 
   const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173'
 
@@ -62,6 +64,48 @@ function createApp(options = {}) {
       message: 'Too many authentication attempts. Please retry in a minute.',
     }),
   })
+  const protectedLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+  })
+
+  const encryptionKey = crypto.createHash('sha256').update(cookieEncryptionSecret).digest()
+
+  const encryptCookieValue = (value) => {
+    const iv = crypto.randomBytes(12)
+    const cipher = crypto.createCipheriv('aes-256-gcm', encryptionKey, iv)
+    const encryptedValue = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()])
+    const authTag = cipher.getAuthTag()
+
+    return `${iv.toString('base64url')}.${authTag.toString('base64url')}.${encryptedValue.toString('base64url')}`
+  }
+
+  const decryptCookieValue = (value) => {
+    const [ivRaw, authTagRaw, encryptedRaw] = String(value).split('.')
+    if (!ivRaw || !authTagRaw || !encryptedRaw) {
+      return null
+    }
+
+    try {
+      const decipher = crypto.createDecipheriv(
+        'aes-256-gcm',
+        encryptionKey,
+        Buffer.from(ivRaw, 'base64url'),
+      )
+      decipher.setAuthTag(Buffer.from(authTagRaw, 'base64url'))
+      const decrypted = Buffer.concat([
+        decipher.update(Buffer.from(encryptedRaw, 'base64url')),
+        decipher.final(),
+      ])
+      return decrypted.toString('utf8')
+    } catch {
+      return null
+    }
+  }
+
+  const issueCsrfToken = () => crypto.randomBytes(16).toString('hex')
 
   const issueAccessToken = (user) =>
     jwt.sign({ sub: user.id, email: user.email, name: user.name }, jwtSecret, {
@@ -74,9 +118,19 @@ function createApp(options = {}) {
     })
 
   const setRefreshCookie = (res, token) => {
-    res.cookie('vault_refresh_token', token, {
+    res.cookie('vault_refresh_token', encryptCookieValue(token), {
       httpOnly: true,
-      sameSite: 'lax',
+      sameSite: 'strict',
+      secure: process.env.NODE_ENV === 'production',
+      maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
+      path: '/api/v1/auth',
+    })
+  }
+
+  const setCsrfCookie = (res, token) => {
+    res.cookie('vault_csrf_token', token, {
+      httpOnly: false,
+      sameSite: 'strict',
       secure: process.env.NODE_ENV === 'production',
       maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
       path: '/api/v1/auth',
@@ -85,6 +139,7 @@ function createApp(options = {}) {
 
   const clearRefreshCookie = (res) => {
     res.clearCookie('vault_refresh_token', { path: '/api/v1/auth' })
+    res.clearCookie('vault_csrf_token', { path: '/api/v1/auth' })
   }
 
   const authMiddleware = async (req, res, next) => {
@@ -154,6 +209,7 @@ function createApp(options = {}) {
       const accessToken = issueAccessToken(user)
       const refreshToken = issueRefreshToken(user)
       await store.storeRefreshToken({ userId: user.id, token: refreshToken })
+      setCsrfCookie(res, issueCsrfToken())
       setRefreshCookie(res, refreshToken)
 
       return res.status(201).json(
@@ -212,6 +268,7 @@ function createApp(options = {}) {
       const accessToken = issueAccessToken(user)
       const refreshToken = issueRefreshToken(user)
       await store.storeRefreshToken({ userId: user.id, token: refreshToken })
+      setCsrfCookie(res, issueCsrfToken())
       setRefreshCookie(res, refreshToken)
 
       return res.json(
@@ -244,8 +301,20 @@ function createApp(options = {}) {
     }
   })
 
-  app.post('/api/v1/auth/refresh', async (req, res) => {
-    const currentRefreshToken = req.cookies?.vault_refresh_token
+  const validateCsrf = (req) => req.cookies?.vault_csrf_token && req.cookies.vault_csrf_token === req.headers['x-csrf-token']
+
+  app.post('/api/v1/auth/refresh', protectedLimiter, async (req, res) => {
+    if (!validateCsrf(req)) {
+      clearRefreshCookie(res)
+      return res.status(403).json(
+        responseEnvelope(null, {
+          code: 'FORBIDDEN',
+          message: 'CSRF validation failed',
+        }),
+      )
+    }
+
+    const currentRefreshToken = decryptCookieValue(req.cookies?.vault_refresh_token)
     if (!currentRefreshToken) {
       return res.status(401).json(
         responseEnvelope(null, {
@@ -281,6 +350,7 @@ function createApp(options = {}) {
 
       const nextAccessToken = issueAccessToken(user)
       const nextRefreshToken = issueRefreshToken(user)
+      setCsrfCookie(res, issueCsrfToken())
       await store.rotateRefreshToken({
         oldToken: currentRefreshToken,
         newToken: nextRefreshToken,
@@ -309,8 +379,18 @@ function createApp(options = {}) {
     }
   })
 
-  app.post('/api/v1/auth/logout', async (req, res) => {
-    const currentRefreshToken = req.cookies?.vault_refresh_token
+  app.post('/api/v1/auth/logout', protectedLimiter, async (req, res) => {
+    if (!validateCsrf(req)) {
+      clearRefreshCookie(res)
+      return res.status(403).json(
+        responseEnvelope(null, {
+          code: 'FORBIDDEN',
+          message: 'CSRF validation failed',
+        }),
+      )
+    }
+
+    const currentRefreshToken = decryptCookieValue(req.cookies?.vault_refresh_token)
 
     if (currentRefreshToken) {
       await store.revokeRefreshToken(currentRefreshToken)
@@ -324,7 +404,7 @@ function createApp(options = {}) {
     )
   })
 
-  app.get('/api/v1/auth/me', authMiddleware, (req, res) => {
+  app.get('/api/v1/auth/me', protectedLimiter, authMiddleware, (req, res) => {
     res.json(
       responseEnvelope({
         user: {

@@ -27,7 +27,7 @@ This repository now includes the Phase 1 foundation from the PRD:
 ### 1) Backend
 
 ```bash
-cd /home/runner/work/VAULT/VAULT/backend
+cd backend
 cp .env.example .env
 npm install
 npm run dev
@@ -38,7 +38,7 @@ Backend API base URL: `http://localhost:4000/api/v1`
 ### 2) Frontend
 
 ```bash
-cd /home/runner/work/VAULT/VAULT/frontend
+cd frontend
 cp .env.example .env
 npm install
 npm run dev
@@ -49,6 +49,6 @@ Frontend URL: `http://localhost:5173`
 ## Validation Commands
 
 ```bash
-cd /home/runner/work/VAULT/VAULT/backend && npm test
-cd /home/runner/work/VAULT/VAULT/frontend && npm run lint && npm test && npm run build
+cd backend && npm test
+cd frontend && npm run lint && npm test && npm run build
 ```
