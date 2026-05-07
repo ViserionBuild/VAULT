@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+frontend/node_modules/
+server/node_modules/
+
+# builds
+frontend/dist/
+
+# env
+.env
+.env.*
+frontend/.env*
+server/.env*
+
+# logs
+npm-debug.log*
