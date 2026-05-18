@@ -4,6 +4,9 @@ import { AppShell } from './components/layout/app-shell'
 import { LoginPage } from './pages/login-page'
 import { SignupPage } from './pages/signup-page'
 import { DashboardPage } from './pages/dashboard-page'
+import { ResourcesPage } from './pages/resources-page'
+import { FavoritesPage } from './pages/favorites-page'
+import { TrashPage } from './pages/trash-page'
 
 export default function App() {
   return (
@@ -19,6 +22,9 @@ export default function App() {
         }
       >
         <Route index element={<DashboardPage />} />
+        <Route path="resources" element={<ResourcesPage />} />
+        <Route path="favorites" element={<FavoritesPage />} />
+        <Route path="trash" element={<TrashPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -1,23 +1,32 @@
 const request = require('supertest')
 const { createApp } = require('../src/app')
+const { createSupabaseStore } = require('../src/db_service/supabase-store')
+
+const hasSupabase = Boolean(
+  process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY,
+)
+const run = hasSupabase ? describe : describe.skip
 
 function extractCookie(response, cookieName) {
   const cookie = response.headers['set-cookie']?.find((entry) => entry.startsWith(`${cookieName}=`))
   return cookie?.split(';')[0].split('=')[1]
 }
 
-describe('Phase 1 auth flow', () => {
+run('Phase 1 auth flow', () => {
   it('supports signup, protected route access, token refresh rotation and logout', async () => {
+    const store = createSupabaseStore()
     const { app } = createApp({
+      store,
       jwtSecret: 'test-jwt-secret',
       refreshTokenSecret: 'test-refresh-secret',
     })
 
     const agent = request.agent(app)
+    const email = `tester-${Date.now()}@example.com`
 
     const signupRes = await agent.post('/api/v1/auth/signup').send({
       name: 'Vault Tester',
-      email: 'tester@example.com',
+      email,
       password: 'supersafe123',
     })
 
@@ -30,7 +39,7 @@ describe('Phase 1 auth flow', () => {
 
     const meRes = await agent.get('/api/v1/auth/me').set('Authorization', `Bearer ${accessToken}`)
     expect(meRes.statusCode).toBe(200)
-    expect(meRes.body.data.user.email).toBe('tester@example.com')
+    expect(meRes.body.data.user.email).toBe(email)
 
     const refreshRes = await agent.post('/api/v1/auth/refresh').set('x-csrf-token', csrfToken)
     expect(refreshRes.statusCode).toBe(200)
@@ -45,7 +54,9 @@ describe('Phase 1 auth flow', () => {
   })
 
   it('limits auth endpoints to 5 requests per minute per IP', async () => {
+    const store = createSupabaseStore()
     const { app } = createApp({
+      store,
       jwtSecret: 'test-jwt-secret',
       refreshTokenSecret: 'test-refresh-secret',
     })

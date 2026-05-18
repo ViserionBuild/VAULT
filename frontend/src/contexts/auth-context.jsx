@@ -1,4 +1,4 @@
-import { createContext, useContext, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { apiRequest } from '../lib/api'
 
 const AuthContext = createContext(null)
@@ -12,12 +12,20 @@ export function AuthProvider({ children }) {
     return raw ? JSON.parse(raw) : null
   })
   const [loading, setLoading] = useState(false)
+  const [ready, setReady] = useState(false)
 
   const persistSession = ({ accessToken: nextToken, user: nextUser }) => {
     localStorage.setItem(TOKEN_KEY, nextToken)
     localStorage.setItem(USER_KEY, JSON.stringify(nextUser))
     setAccessToken(nextToken)
     setUser(nextUser)
+  }
+
+  const clearSession = () => {
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(USER_KEY)
+    setAccessToken(null)
+    setUser(null)
   }
 
   const login = async (email, password) => {
@@ -55,10 +63,7 @@ export function AuthProvider({ children }) {
     try {
       await apiRequest('/auth/logout', { method: 'POST' })
     } finally {
-      localStorage.removeItem(TOKEN_KEY)
-      localStorage.removeItem(USER_KEY)
-      setAccessToken(null)
-      setUser(null)
+      clearSession()
     }
   }
 
@@ -75,10 +80,52 @@ export function AuthProvider({ children }) {
     }
   }
 
+  useEffect(() => {
+    let cancelled = false
+
+    const bootstrapSession = async () => {
+      if (!accessToken) {
+        try {
+          await refreshSession()
+        } catch {
+          clearSession()
+        } finally {
+          if (!cancelled) setReady(true)
+        }
+        return
+      }
+
+      try {
+        const me = await apiRequest('/auth/me', { token: accessToken })
+        if (!cancelled && me?.user) {
+          localStorage.setItem(USER_KEY, JSON.stringify(me.user))
+          setUser(me.user)
+        }
+      } catch (error) {
+        try {
+          await refreshSession()
+        } catch {
+          clearSession()
+        }
+      } finally {
+        if (!cancelled) setReady(true)
+      }
+    }
+
+    void bootstrapSession()
+
+    return () => {
+      cancelled = true
+    }
+    // bootstrap only once on mount; accessToken is intentionally read from the initial session state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const value = {
     user,
     accessToken,
     loading,
+    ready,
     isAuthenticated: Boolean(accessToken && user),
     login,
     signup,
