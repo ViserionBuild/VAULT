@@ -10,7 +10,9 @@ const { createHealthRouter } = require('./routes/health.routes')
 const { createAuthRouter } = require('./routes/auth.routes')
 const { createWorkspacesRouter } = require('./routes/workspaces.routes')
 const { createItemsRouter } = require('./routes/items.routes')
+const { createNotesRouter } = require('./routes/notes.routes')
 const { createTagsRouter } = require('./routes/tags.routes')
+const { createTodosRouter } = require('./routes/todos.routes')
 const { responseEnvelope } = require('./utils/response')
 
 function createApp(options = {}) {
@@ -60,6 +62,8 @@ function createApp(options = {}) {
   )
   app.use('/api/v1/workspaces', createWorkspacesRouter({ store, authMiddleware }))
   app.use('/api/v1/items', createItemsRouter({ store, authMiddleware }))
+  app.use('/api/v1/notes', createNotesRouter({ store, authMiddleware }))
+  app.use('/api/v1/todo', createTodosRouter({ store, authMiddleware }))
   app.use('/api/v1/tags', createTagsRouter({ store, authMiddleware }))
 
   app.use((error, _req, res, _next) => {

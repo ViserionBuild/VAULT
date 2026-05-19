@@ -85,6 +85,13 @@ export function AuthProvider({ children }) {
 
     const bootstrapSession = async () => {
       if (!accessToken) {
+        // only attempt refresh if a refresh token cookie exists
+        const hasRefresh = document.cookie.split('; ').some(c => c.startsWith('vault_refresh_token='))
+        if (!hasRefresh) {
+          if (!cancelled) setReady(true)
+          return
+        }
+
         try {
           await refreshSession()
         } catch {

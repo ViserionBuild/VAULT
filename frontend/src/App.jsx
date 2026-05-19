@@ -5,6 +5,8 @@ import { LoginPage } from './pages/login-page'
 import { SignupPage } from './pages/signup-page'
 import { DashboardPage } from './pages/dashboard-page'
 import { ResourcesPage } from './pages/resources-page'
+import { NotesPage } from './pages/notes-page'
+import { TodoPage } from './pages/todo-page'
 import { FavoritesPage } from './pages/favorites-page'
 import { TrashPage } from './pages/trash-page'
 
@@ -23,6 +25,9 @@ export default function App() {
       >
         <Route index element={<DashboardPage />} />
         <Route path="resources" element={<ResourcesPage />} />
+        <Route path="notes" element={<NotesPage />} />
+        <Route path="todo" element={<TodoPage />} />
+        <Route path="todo/:listId" element={<TodoPage />} />
         <Route path="favorites" element={<FavoritesPage />} />
         <Route path="trash" element={<TrashPage />} />
       </Route>

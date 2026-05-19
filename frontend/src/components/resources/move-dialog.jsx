@@ -3,9 +3,8 @@ import { Dialog } from '../ui/dialog'
 import { Button } from '../ui/button'
 import { Folder , ChevronRight, CornerDownRight } from 'lucide-react'
 
-export function MoveDialog({ open, onClose, onSubmit, api, workspaceId }) {
+export function MoveDialog({ open, onClose, onSubmit, api, workspaceId, basePath = '/items' }) {
   const [folders, setFolders] = useState([])
-  const [currentParent, setCurrentParent] = useState(null)
   const [breadcrumbs, setBreadcrumbs] = useState([])
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -13,19 +12,19 @@ export function MoveDialog({ open, onClose, onSubmit, api, workspaceId }) {
   const fetchFolders = useCallback(async (parentId) => {
     if (!workspaceId) return
     try {
-      const data = await api(`/items?workspaceId=${workspaceId}&type=folder${parentId ? `&parentId=${parentId}` : ''}`)
-      setFolders(data.items ?? [])
+      const data = await api(`${basePath}?workspaceId=${workspaceId}${parentId ? `&parentId=${parentId}` : ''}`)
+      setFolders((data.items ?? data.folders ?? []).filter((folder) => folder.type === 'folder'))
       setBreadcrumbs(data.breadcrumbs ?? [])
-      setCurrentParent(parentId)
     } catch {
       // ignore
     }
-  }, [api, workspaceId])
+  }, [api, workspaceId, basePath])
 
   useEffect(() => {
     if (open) {
-      fetchFolders(null)
-      setSelected(null)
+      queueMicrotask(() => {
+        void fetchFolders(null)
+      })
     }
   }, [open, fetchFolders])
 

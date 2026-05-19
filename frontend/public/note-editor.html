@@ -1,0 +1,82 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Note Editor</title>
+  <style>
+    :root { --bg: #0f172a; --panel: #0b1220; --btn: #2563eb; }
+    html,body { height:100%; margin:0; font-family: Inter, system-ui, sans-serif; background:#f8fafc; }
+    .toolbar { display:flex; gap:6px; padding:8px; background:#fff; border-bottom:1px solid #e6edf3; }
+    .toolbar button { padding:6px 8px; border:1px solid #e2e8f0; background:#fff; border-radius:6px; cursor:pointer }
+    #editor { padding:12px; min-height:300px; outline:none; }
+    .actions { display:flex; gap:8px; justify-content:flex-end; padding:8px; background:#fff; border-top:1px solid #e6edf3; }
+    .container { display:flex; flex-direction:column; height:100vh; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="toolbar">
+      <button type="button" data-cmd="bold"><strong>B</strong></button>
+      <button type="button" data-cmd="italic"><em>I</em></button>
+      <button type="button" data-cmd="underline"><u>U</u></button>
+      <button type="button" data-cmd="insertUnorderedList">• List</button>
+      <button type="button" data-cmd="insertOrderedList">1. List</button>
+      <button type="button" data-cmd="createLink">Link</button>
+      <button type="button" data-cmd="removeFormat">Clear</button>
+    </div>
+
+    <div id="editor" contenteditable="true" aria-label="Note editor"></div>
+
+    <div class="actions">
+      <button id="cancel">Cancel</button>
+      <button id="save" style="background:var(--btn); color:#fff; border:none; padding:8px 12px; border-radius:6px;">Save</button>
+    </div>
+  </div>
+
+  <script>
+    // Basic execCommand-based rich text editor for iframe use
+    function exec(cmd, value) {
+      document.execCommand(cmd, false, value || null)
+      document.getElementById('editor').focus()
+    }
+
+    document.querySelectorAll('.toolbar button').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const cmd = btn.getAttribute('data-cmd')
+        if (cmd === 'createLink') {
+          const url = prompt('Enter URL', 'https://')
+          if (url) exec('createLink', url)
+        } else {
+          exec(cmd)
+        }
+      })
+    })
+
+    // Post messages to parent
+    const parentOrigin = '*'
+    function doSave() {
+      const html = document.getElementById('editor').innerHTML
+      window.parent.postMessage({ type: 'save', content: html }, parentOrigin)
+    }
+
+    document.getElementById('save').addEventListener('click', doSave)
+    document.getElementById('cancel').addEventListener('click', () => {
+      window.parent.postMessage({ type: 'cancel' }, parentOrigin)
+    })
+
+    // Receive init payload and other commands
+    window.addEventListener('message', (e) => {
+      const msg = e.data || {}
+      if (msg.type === 'init') {
+        document.getElementById('editor').innerHTML = msg.content || ''
+      } else if (msg.type === 'request-save') {
+        doSave()
+      }
+    })
+
+    // Notify parent we're ready
+    window.parent.postMessage({ type: 'editor-ready' }, parentOrigin)
+  </script>
+</body>
+</html>

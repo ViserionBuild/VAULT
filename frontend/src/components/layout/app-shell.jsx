@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import {
   Menu, Moon, Sun, Monitor, Home, FolderOpen, Star,
-  Clock, Trash2, Settings, Tag, Plus, ChevronDown,
-  PanelLeftClose, PanelLeft, LogOut
+  Trash2, Tag, Plus, ChevronDown,
+  PanelLeftClose, PanelLeft, LogOut, NotebookPen, ClipboardList
 } from 'lucide-react'
 import { useTheme } from '../../contexts/theme-context'
 import { useAuth } from '../../contexts/auth-context'
@@ -13,6 +13,8 @@ import { Button } from '../ui/button'
 const navItems = [
   { label: 'Dashboard', path: '/', icon: Home },
   { label: 'Resources', path: '/resources', icon: FolderOpen },
+  { label: 'Notes', path: '/notes', icon: NotebookPen },
+  { label: 'TODO', path: '/todo', icon: ClipboardList },
   { label: 'Favorites', path: '/favorites', icon: Star },
   { label: 'Tags', path: '/tags', icon: Tag },
   { label: 'Trash', path: '/trash', icon: Trash2 },
@@ -25,8 +27,6 @@ export function AppShell() {
   const { activeWorkspace, workspaces, switchWorkspace } = useWorkspace()
   const [showWsDropdown, setShowWsDropdown] = useState(false)
   const navigate = useNavigate()
-
-  const themeIcon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor
 
   const cycleTheme = () => {
     const order = ['dark', 'light', 'system']
@@ -115,6 +115,7 @@ export function AppShell() {
               {sidebarOpen && <span>{label}</span>}
             </NavLink>
           ))}
+
         </nav>
 
         {/* Sidebar Footer */}
