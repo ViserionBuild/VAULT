@@ -85,10 +85,20 @@ export function ResourceCard({ item, onOpen, onContextMenu, onFavorite, isSelect
           <p className="text-xs text-muted-foreground line-clamp-2">{item.description}</p>
         )}
         {item.url && (
-          <p className="flex items-center gap-1 text-xs text-muted-foreground/60 truncate">
+          <a
+            href={
+              item.url.startsWith('http')
+                ? item.url
+                : `https://${item.url}`
+            }
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-1 text-xs text-muted-foreground/60 truncate hover:text-primary"
+          >
             <ExternalLink className="h-3 w-3 shrink-0" />
             {extractDomain(item.url)}
-          </p>
+          </a>
         )}
       </div>
 
@@ -144,10 +154,20 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
       <div className="flex-1 min-w-0">
         <h3 className="font-medium text-sm truncate">{item.title}</h3>
         {item.url && (
-          <p className="flex items-center gap-1 text-xs text-muted-foreground/60 truncate">
+          <a
+            href={
+              item.url.startsWith('http')
+                ? item.url
+                : `https://${item.url}`
+            }
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="flex items-center gap-1 text-xs text-muted-foreground/60 truncate hover:text-primary"
+          >
             <ExternalLink className="h-3 w-3 shrink-0" />
             {extractDomain(item.url)}
-          </p>
+          </a>
         )}
       </div>
 
