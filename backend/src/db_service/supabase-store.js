@@ -29,6 +29,8 @@ function mapWorkspaceRow(row) {
 
 function mapFolderRow(row) {
   if (!row) return null
+  const metadata = row.metadata ?? {}
+  const mergedMetadata = row.color && !metadata.color ? { ...metadata, color: row.color } : metadata
   return {
     id: row.id,
     title: row.title,
@@ -36,6 +38,7 @@ function mapFolderRow(row) {
     url: null,
     description: row.description ?? '',
     icon: row.icon,
+    color: row.color ?? null,
     thumbnail: null,
     parentId: row.parent_id,
     userId: row.user_id,
@@ -43,7 +46,7 @@ function mapFolderRow(row) {
     isFavorite: row.is_favorite,
     isDeleted: row.is_deleted,
     position: row.position,
-    metadata: row.metadata ?? {},
+    metadata: mergedMetadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at ?? null,
@@ -1267,6 +1270,7 @@ class SupabaseStore {
           title,
           description: description ?? '',
           icon: icon ?? null,
+          color: color ?? null,
           parent_id: parentId ? String(parentId) : null,
           user_id: String(userId),
           workspace_id: String(workspaceId),
@@ -1352,6 +1356,7 @@ class SupabaseStore {
     if (updates.title !== undefined) payload.title = updates.title
     if (updates.description !== undefined) payload.description = updates.description
     if (updates.icon !== undefined) payload.icon = updates.icon
+    if (updates.color !== undefined && entry.table === 'folders') payload.color = updates.color
     if (updates.metadata !== undefined) payload.metadata = updates.metadata
     if (updates.position !== undefined) payload.position = updates.position
 

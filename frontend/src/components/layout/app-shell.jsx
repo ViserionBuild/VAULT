@@ -9,6 +9,7 @@ import { useTheme } from '../../contexts/theme-context'
 import { useAuth } from '../../contexts/auth-context'
 import { useWorkspace } from '../../contexts/workspace-context'
 import { Button } from '../ui/button'
+import vaultIcon from '../../assets/bank-vault-16.png'
 
 const navItems = [
   { label: 'Dashboard', path: '/', icon: Home },
@@ -46,9 +47,7 @@ export function AppShell() {
         <div className="flex h-14 items-center gap-2 border-b border-border px-4">
           {sidebarOpen && (
             <Link to="/" className="flex items-center gap-2 font-bold text-lg tracking-wider">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground text-sm font-bold">
-                V
-              </div>
+              <img src={vaultIcon} alt="Vault" className="h-8 w-8 rounded-lg" />
               <span>VAULT</span>
             </Link>
           )}
