@@ -15,7 +15,6 @@ import { EditItemDialog } from '../components/resources/edit-item-dialog'
 import { BulkActionBar } from '../components/resources/bulk-action-bar'
 import { MoveDialog } from '../components/resources/move-dialog'
 import { ContextMenu, useContextMenu } from '../components/ui/context-menu'
-import { Select } from '../components/ui/select'
 
 export function ResourcesPage() {
   const api = useApi()
@@ -92,6 +91,7 @@ export function ResourcesPage() {
         title,
         type: 'folder',
         icon,
+        color,
         workspaceId: activeWorkspace.id,
         parentId: currentFolder,
         description: '',
@@ -221,17 +221,6 @@ export function ResourcesPage() {
         </div>
         <div className="flex items-center gap-2">
           <ViewToggle activeView={view} onViewChange={setView} />
-          <Select
-            className="w-36 h-9 text-xs"
-            value={sortBy}
-            onChange={(e) => handleSort(e.target.value)}
-          >
-            <option value="position">Manual</option>
-            <option value="title">Name</option>
-            <option value="createdAt">Created</option>
-            <option value="updatedAt">Modified</option>
-            <option value="type">Type</option>
-          </Select>
           <Button size="sm" variant="outline" onClick={() => setShowCreateFolder(true)}>
             <FolderPlus className="mr-1.5 h-4 w-4" /> Folder
           </Button>
@@ -271,7 +260,7 @@ export function ResourcesPage() {
               <FolderPlus className="mr-1.5 h-4 w-4" /> New Folder
             </Button>
             <Button onClick={() => setShowAddResource(true)}>
-              <Plus className="mr-1.5 h-4 w-4" /> {currentFolder ? 'Add to Folder' : 'Add Resource'}
+              <Plus className="mr-1.5 h-4 w-4" /> {currentFolder ? 'Add Resource' : 'Add Resource'}
             </Button>
           </div>
         </div>
@@ -279,17 +268,21 @@ export function ResourcesPage() {
 
       {/* Grid View */}
       {view === 'grid' && items.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(80px,1fr))]">
           {items.map((item) => (
-            <ResourceCard
+            <div
               key={item.id}
-              item={item}
-              onOpen={handleOpen}
-              onContextMenu={handleContextMenu}
-              onFavorite={handleFavorite}
-              isSelected={selectedIds.includes(item.id)}
-              onSelect={handleSelect}
-            />
+              className="aspect-square"
+            >
+              <ResourceCard
+                item={item}
+                onOpen={handleOpen}
+                onContextMenu={handleContextMenu}
+                onFavorite={handleFavorite}
+                isSelected={selectedIds.includes(item.id)}
+                onSelect={handleSelect}
+              />
+            </div>
           ))}
         </div>
       )}

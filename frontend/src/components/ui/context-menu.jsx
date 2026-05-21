@@ -3,6 +3,7 @@ import { cn } from '../../lib/utils'
 
 export function ContextMenu({ items, position, onClose }) {
   const menuRef = useRef(null)
+  const [menuPos, setMenuPos] = useState(position)
 
   useEffect(() => {
     const handler = (e) => {
@@ -18,7 +19,27 @@ export function ContextMenu({ items, position, onClose }) {
     }
   }, [onClose])
 
-  if (!position) return null
+  useEffect(() => {
+    if (!position) return
+    setMenuPos(position)
+  }, [position])
+
+  useEffect(() => {
+    if (!position || !menuRef.current) return
+
+    const menuRect = menuRef.current.getBoundingClientRect()
+    const padding = 8
+    const maxLeft = window.innerWidth - menuRect.width - padding
+    const maxTop = window.innerHeight - menuRect.height - padding
+    const nextLeft = Math.min(Math.max(position.x, padding), Math.max(padding, maxLeft))
+    const nextTop = Math.min(Math.max(position.y, padding), Math.max(padding, maxTop))
+
+    if (nextLeft !== position.x || nextTop !== position.y) {
+      setMenuPos({ x: nextLeft, y: nextTop })
+    }
+  }, [position])
+
+  if (!position || !menuPos) return null
 
   return (
     <div
@@ -27,7 +48,7 @@ export function ContextMenu({ items, position, onClose }) {
         'fixed z-50 min-w-[180px] rounded-lg border border-border bg-background p-1 shadow-xl',
         'animate-in fade-in zoom-in-95',
       )}
-      style={{ top: position.y, left: position.x }}
+      style={{ top: menuPos.y, left: menuPos.x }}
     >
       {items.map((item, idx) =>
         item.separator ? (

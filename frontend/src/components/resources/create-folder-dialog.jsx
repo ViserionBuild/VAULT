@@ -3,7 +3,10 @@ import { Dialog } from '../ui/dialog'
 import { Input } from '../ui/input'
 import { Button } from '../ui/button'
 
+const DEFAULT_FOLDER_COLOR = '#d1d5db'
+
 const FOLDER_COLORS = [
+  DEFAULT_FOLDER_COLOR,
   '#7c3aed', '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
   '#ec4899', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316',
 ]
@@ -12,7 +15,7 @@ const FOLDER_ICONS = ['📁', '📂', '🗂️', '📋', '📌', '🔖', '💼',
 
 export function CreateFolderDialog({ open, onClose, onSubmit }) {
   const [name, setName] = useState('')
-  const [color, setColor] = useState(FOLDER_COLORS[0])
+  const [color, setColor] = useState(DEFAULT_FOLDER_COLOR)
   const [icon, setIcon] = useState(FOLDER_ICONS[0])
   const [loading, setLoading] = useState(false)
 
@@ -23,7 +26,7 @@ export function CreateFolderDialog({ open, onClose, onSubmit }) {
     try {
       await onSubmit({ title: name.trim(), icon, color })
       setName('')
-      setColor(FOLDER_COLORS[0])
+      setColor(DEFAULT_FOLDER_COLOR)
       setIcon(FOLDER_ICONS[0])
       onClose()
     } finally {
