@@ -1,0 +1,30 @@
+name: Keep Services Alive
+
+on:
+  schedule:
+    # Every 3 days at 12:00 AM UTC
+    - cron: '0 0 */3 * *'
+
+  # Allow manual run from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Ping Backend Health
+        run: |
+          curl -fsSL \
+            https://vault-backend-service.onrender.com/api/v1/health
+
+      - name: Ping Backend Database
+        run: |
+          curl -fsSL \
+            -H "x-cron-secret: ${{ secrets.CRON_SECRET }}" \
+            https://vault-backend-service.onrender.com/api/v1/health/ping_db
+
+      - name: Ping Frontend
+        run: |
+          curl -fsSL \
+            https://vault-virid.vercel.app/login

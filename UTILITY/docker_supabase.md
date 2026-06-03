@@ -173,7 +173,7 @@ cd your-project-folder
 
 ---
 
-# Step 2 — Initialize Supabase
+# Step 2 — Initialize Supabase at root
 
 ```bash
 supabase init
