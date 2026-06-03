@@ -1,6 +1,8 @@
 const express = require('express')
 const { responseEnvelope } = require('../utils/response')
-const { supabase } = require('../db_service/supabase')
+const { createSupabaseClient } = require('../db_service/supabase')
+
+const supabase = createSupabaseClient()
 
 function createHealthRouter() {
   const router = express.Router()
