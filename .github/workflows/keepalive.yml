@@ -27,4 +27,4 @@ jobs:
       - name: Ping Frontend
         run: |
           curl -fsSL \
-            https://vault-virid.vercel.app/login
+            https://vault-virid.vercel.app
