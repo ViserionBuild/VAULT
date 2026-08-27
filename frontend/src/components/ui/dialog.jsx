@@ -20,14 +20,14 @@ export function Dialog({ open, onClose, title, children, className }) {
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm animate-in fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4 backdrop-blur-sm animate-in fade-in"
       onClick={(e) => {
         if (e.target === overlayRef.current) onClose()
       }}
     >
       <div
         className={cn(
-          'relative w-full max-w-lg rounded-xl border border-border bg-background p-6 shadow-2xl',
+          'relative my-auto w-full max-w-lg rounded-xl border border-border bg-background p-5 shadow-2xl sm:p-6',
           'animate-in zoom-in-95',
           className,
         )}

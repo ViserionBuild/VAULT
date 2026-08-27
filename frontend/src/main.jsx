@@ -6,6 +6,7 @@ import App from './App'
 import { ThemeProvider } from './contexts/theme-context'
 import { AuthProvider } from './contexts/auth-context'
 import { WorkspaceProvider } from './contexts/workspace-context'
+import { ProfileProvider } from './contexts/profile-context'
 import './index.css'
 
 const queryClient = new QueryClient()
@@ -16,9 +17,11 @@ createRoot(document.getElementById('root')).render(
       <ThemeProvider>
         <AuthProvider>
           <WorkspaceProvider>
+            <ProfileProvider>
             <BrowserRouter>
               <App />
             </BrowserRouter>
+            </ProfileProvider>
           </WorkspaceProvider>
         </AuthProvider>
       </ThemeProvider>

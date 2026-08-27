@@ -8,6 +8,7 @@ const { createAuthMiddleware } = require('./middleware/auth')
 const { createAuthLimiter, createProtectedLimiter } = require('./middleware/rate-limits')
 const { createHealthRouter } = require('./routes/health.routes')
 const { createAuthRouter } = require('./routes/auth.routes')
+const { createProfileRouter } = require('./routes/profile.routes')
 const { createWorkspacesRouter } = require('./routes/workspaces.routes')
 const { createItemsRouter } = require('./routes/items.routes')
 const { createNotesRouter } = require('./routes/notes.routes')
@@ -24,17 +25,29 @@ function createApp(options = {}) {
     options.refreshTokenSecret ?? process.env.JWT_REFRESH_SECRET ?? 'development-refresh-secret'
   const cookieEncryptionSecret = process.env.COOKIE_ENCRYPTION_SECRET ?? refreshTokenSecret
 
-  const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:5173'
+  const allowedOrigins = (process.env.FRONTEND_URL ?? 'http://localhost:5173')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean)
 
   app.set('trust proxy', 1)
   app.use(helmet())
   app.use(
     cors({
-      origin: frontendUrl,
+      origin: (origin, callback) => {
+        // Requests without an Origin header (curl, server-to-server) are not
+        // subject to CORS, so let them through.
+        if (!origin || allowedOrigins.includes(origin)) {
+          return callback(null, true)
+        }
+        return callback(new Error(`Origin ${origin} is not allowed by CORS`))
+      },
       credentials: true,
     }),
   )
-  app.use(express.json())
+  // Raised from the 100kb default: profile avatars are sent as inline data
+  // URIs, which exceed it. Still small enough to bound request size.
+  app.use(express.json({ limit: '1mb' }))
   app.use(cookieParser())
 
   const authLimiter = createAuthLimiter()
@@ -59,6 +72,10 @@ function createApp(options = {}) {
       protectedLimiter,
       authMiddleware,
     }),
+  )
+  app.use(
+    '/api/v1/profile',
+    createProfileRouter({ store, authMiddleware, protectedLimiter }),
   )
   app.use('/api/v1/workspaces', createWorkspacesRouter({ store, authMiddleware }))
   app.use('/api/v1/items', createItemsRouter({ store, authMiddleware }))

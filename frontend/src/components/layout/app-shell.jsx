@@ -1,14 +1,15 @@
 import { useState } from 'react'
-import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
+import { Link, NavLink, Outlet } from 'react-router-dom'
 import {
   Menu, Moon, Sun, Monitor, Home, FolderOpen, Star,
-  Trash2, Tag, Plus, ChevronDown,
+  Trash2, Tag, ChevronDown,
   PanelLeftClose, PanelLeft, LogOut, NotebookPen, ClipboardList
 } from 'lucide-react'
 import { useTheme } from '../../contexts/theme-context'
 import { useAuth } from '../../contexts/auth-context'
 import { useWorkspace } from '../../contexts/workspace-context'
-import { Button } from '../ui/button'
+import { useProfile } from '../../contexts/profile-context'
+import { Avatar } from '../ui/avatar'
 import vaultIcon from '../../assets/bank-vault-16.png'
 
 const navItems = [
@@ -22,12 +23,16 @@ const navItems = [
 ]
 
 export function AppShell() {
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  // Closed by default on mobile, where the sidebar is an overlay; open on
+  // desktop, where it occupies its own column.
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => typeof window === 'undefined' || window.innerWidth >= 768,
+  )
   const { theme, setTheme } = useTheme()
   const { logout, user } = useAuth()
   const { activeWorkspace, workspaces, switchWorkspace } = useWorkspace()
+  const { profile } = useProfile()
   const [showWsDropdown, setShowWsDropdown] = useState(false)
-  const navigate = useNavigate()
 
   const cycleTheme = () => {
     const order = ['dark', 'light', 'system']
@@ -109,6 +114,11 @@ export function AppShell() {
                 } ${!sidebarOpen ? 'justify-center px-0' : ''}`
               }
               title={label}
+              onClick={() => {
+                // On mobile the sidebar overlays the content, so dismiss it
+                // once a destination is chosen.
+                if (window.innerWidth < 768) setSidebarOpen(false)
+              }}
             >
               <Icon className="h-4.5 w-4.5 shrink-0" />
               {sidebarOpen && <span>{label}</span>}
@@ -119,6 +129,25 @@ export function AppShell() {
 
         {/* Sidebar Footer */}
         <div className="border-t border-border p-2 space-y-1">
+          {/* Profile sits directly above Logout, grouping account actions */}
+          <NavLink
+            to="/profile"
+            onClick={() => {
+              if (window.innerWidth < 768) setSidebarOpen(false)
+            }}
+            className={({ isActive }) =>
+              `flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                isActive
+                  ? 'bg-primary/10 text-primary font-medium'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              } ${!sidebarOpen ? 'justify-center px-0' : ''}`
+            }
+            title={user?.name ?? 'Profile'}
+          >
+            <Avatar user={user} profile={profile} className="h-5 w-5 shrink-0 text-[10px]" />
+            {sidebarOpen && <span className="truncate">{user?.name ?? 'Profile'}</span>}
+          </NavLink>
+
           <button
             onClick={cycleTheme}
             className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-muted-foreground hover:bg-muted hover:text-foreground transition-colors ${!sidebarOpen ? 'justify-center px-0' : ''}`}
@@ -145,38 +174,26 @@ export function AppShell() {
       </aside>
 
       {/* Main Content */}
-      <div className={`flex flex-1 flex-col transition-all duration-300 ${sidebarOpen ? 'ml-64' : 'ml-0 md:ml-16'}`}>
-        {/* Top Bar */}
-        <header className="sticky top-0 z-20 flex h-14 items-center gap-3 border-b border-border bg-background/90 px-4 backdrop-blur md:px-6">
+      <div
+        className={`flex min-w-0 flex-1 flex-col transition-all duration-300 ${
+          sidebarOpen ? 'md:ml-64' : 'md:ml-16'
+        }`}
+      >
+        {/* Mobile-only bar: it exists solely to hold the sidebar toggle, which
+            is the only way to reach navigation on small screens. On desktop the
+            sidebar is always present, so the bar would be empty. */}
+        <header className="sticky top-0 z-20 flex h-14 items-center border-b border-border bg-background/90 px-4 backdrop-blur md:hidden">
           <button
             onClick={() => setSidebarOpen((o) => !o)}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors md:hidden"
+            aria-label="Toggle navigation"
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >
             <Menu className="h-5 w-5" />
           </button>
-
-          <div className="flex-1" />
-
-          <div className="flex items-center gap-3">
-            <Button
-              size="sm"
-              onClick={() => navigate('/resources')}
-              className="gap-1.5"
-            >
-              <Plus className="h-4 w-4" />
-              <span className="hidden sm:inline">Add</span>
-            </Button>
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary text-sm font-semibold">
-                {user?.name?.charAt(0)?.toUpperCase() ?? '?'}
-              </div>
-              <span className="hidden text-sm font-medium sm:block">{user?.name}</span>
-            </div>
-          </div>
         </header>
 
         {/* Page Content */}
-        <main className="flex-1 p-4 sm:p-6 lg:p-8">
+        <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8">
           <Outlet />
         </main>
       </div>

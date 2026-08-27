@@ -26,6 +26,10 @@ export async function apiRequest(path, { token, body, method = 'GET' } = {}) {
   if (!response.ok) {
     const error = new Error(payload?.error?.message ?? 'Request failed')
     error.status = response.status
+    error.code = payload?.error?.code
+    // Callers need this for structured errors such as SESSION_LIMIT_REACHED,
+    // which carries the active session list.
+    error.details = payload?.error?.details
     throw error
   }
 

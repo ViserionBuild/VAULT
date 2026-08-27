@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 import { ProtectedRoute } from './components/routes/protected-route'
+import { SessionGuard } from './components/session/session-guard'
 import { AppShell } from './components/layout/app-shell'
 import { LoginPage } from './pages/login-page'
 import { SignupPage } from './pages/signup-page'
@@ -9,6 +10,7 @@ import { NotesPage } from './pages/notes-page'
 import { TodoPage } from './pages/todo-page'
 import { FavoritesPage } from './pages/favorites-page'
 import { TrashPage } from './pages/trash-page'
+import { ProfilePage } from './pages/profile-page'
 
 export default function App() {
   return (
@@ -19,7 +21,9 @@ export default function App() {
         path="/"
         element={
           <ProtectedRoute>
-            <AppShell />
+            <SessionGuard>
+              <AppShell />
+            </SessionGuard>
           </ProtectedRoute>
         }
       >
@@ -30,6 +34,7 @@ export default function App() {
         <Route path="todo/:listId" element={<TodoPage />} />
         <Route path="favorites" element={<FavoritesPage />} />
         <Route path="trash" element={<TrashPage />} />
+        <Route path="profile" element={<ProfilePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

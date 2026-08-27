@@ -1,8 +1,46 @@
 const crypto = require('node:crypto')
 const jwt = require('jsonwebtoken')
 
-const ACCESS_TOKEN_TTL = '15m'
-const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60
+// Session lifetimes are configuration, not constants. SESSION_IDLE_SECONDS is
+// the bank-style idle window: the frontend counts down against it and logs out
+// when it reaches zero. The access token is issued with a matching TTL so a
+// stolen token cannot outlive the visible session.
+function readSeconds(name, fallback) {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return fallback
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    // eslint-disable-next-line no-console
+    console.warn(`[auth] ${name}="${raw}" is not a positive number; using ${fallback}s`)
+    return fallback
+  }
+  return Math.floor(parsed)
+}
+
+const SESSION_IDLE_SECONDS = readSeconds('SESSION_IDLE_SECONDS', 5 * 60)
+const SESSION_WARNING_SECONDS = Math.min(
+  readSeconds('SESSION_WARNING_SECONDS', 30),
+  // A warning longer than the session itself would show immediately on login.
+  Math.max(SESSION_IDLE_SECONDS - 5, 5),
+)
+
+// Small grace period so a refresh fired at T-0 is not rejected by clock skew.
+// Maximum concurrent sessions (refresh tokens) per account. 0 disables the
+// limit entirely.
+const MAX_CONCURRENT_SESSIONS = (() => {
+  const raw = process.env.MAX_CONCURRENT_SESSIONS
+  if (raw === undefined || raw === '') return 2
+  const parsed = Number(raw)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    // eslint-disable-next-line no-console
+    console.warn(`[auth] MAX_CONCURRENT_SESSIONS="${raw}" is invalid; using 2`)
+    return 2
+  }
+  return Math.floor(parsed)
+})()
+
+const ACCESS_TOKEN_TTL = SESSION_IDLE_SECONDS + 30
+const REFRESH_TOKEN_TTL_SECONDS = readSeconds('REFRESH_TOKEN_TTL_SECONDS', 7 * 24 * 60 * 60)
 
 function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecret, nodeEnv }) {
   const encryptionKey = crypto.createHash('sha256').update(cookieEncryptionSecret).digest()
@@ -56,6 +94,34 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
 
   const verifyRefreshToken = (token) => jwt.verify(token, refreshTokenSecret)
 
+  const verifyAccessToken = (token) => {
+    const payload = jwt.verify(token, jwtSecret)
+    // Reject anything minted for a different purpose.
+    if (payload.tokenType) {
+      throw new Error('Invalid token type')
+    }
+    return payload
+  }
+
+  // Issued only after a correct password, when login is blocked by the session
+  // limit. Scoped by purpose and short-lived: it authorizes listing and ending
+  // that user's own sessions, and nothing else.
+  const SESSION_MGMT_TTL_SECONDS = 120
+
+  const issueSessionManagementToken = (user) =>
+    jwt.sign({ sub: user.id, tokenType: 'session-management' }, jwtSecret, {
+      expiresIn: SESSION_MGMT_TTL_SECONDS,
+    })
+
+  const verifySessionManagementToken = (token) => {
+    const payload = jwt.verify(token, jwtSecret)
+    // An access token must not be usable here and vice versa.
+    if (payload.tokenType !== 'session-management') {
+      throw new Error('Invalid token type')
+    }
+    return payload
+  }
+
   const setRefreshCookie = (res, token) => {
     res.cookie('vault_refresh_token', encryptCookieValue(token), {
       httpOnly: true,
@@ -94,6 +160,9 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
     clearRefreshCookie,
     validateCsrf,
     decryptCookieValue,
+    issueSessionManagementToken,
+    verifySessionManagementToken,
+    verifyAccessToken,
   }
 }
 
@@ -101,4 +170,7 @@ module.exports = {
   createAuthService,
   ACCESS_TOKEN_TTL,
   REFRESH_TOKEN_TTL_SECONDS,
+  SESSION_IDLE_SECONDS,
+  SESSION_WARNING_SECONDS,
+  MAX_CONCURRENT_SESSIONS,
 }

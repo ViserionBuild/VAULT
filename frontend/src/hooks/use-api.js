@@ -1,15 +1,14 @@
 import { useCallback, useState } from 'react'
-import { apiRequest } from '../lib/api'
 import { useAuth } from '../contexts/auth-context'
 
-/** Thin helper so every hook can make authed API calls */
+/**
+ * Thin helper so every hook can make authed API calls. Delegates to
+ * authedRequest, which refreshes and replays on an expired access token.
+ */
 export function useApi() {
-  const { accessToken } = useAuth()
+  const { authedRequest } = useAuth()
 
-  const api = useCallback(
-    (path, opts = {}) => apiRequest(path, { ...opts, token: accessToken }),
-    [accessToken],
-  )
+  const api = useCallback((path, opts = {}) => authedRequest(path, opts), [authedRequest])
 
   return api
 }

@@ -4,6 +4,10 @@ export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
+      screens: {
+        // Small phones (~360-400px) need labels to shorten before `sm` (640px).
+        xs: '400px',
+      },
       colors: {
         border: 'hsl(var(--border))',
         background: 'hsl(var(--background))',

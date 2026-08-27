@@ -1,8 +1,19 @@
+const crypto = require('node:crypto')
 const express = require('express')
 const bcrypt = require('bcryptjs')
 const { z } = require('zod')
 const { signupSchema, loginSchema } = require('../validators/auth')
+const {
+  SESSION_IDLE_SECONDS,
+  SESSION_WARNING_SECONDS,
+  MAX_CONCURRENT_SESSIONS,
+} = require('../services/auth-service')
+const { describeDevice, clientIp } = require('../utils/device')
 const { responseEnvelope } = require('../utils/response')
+
+// Mirrors the hashing in the store so a session row can be matched to the
+// caller's own refresh cookie without ever storing the raw token.
+const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex')
 
 function createAuthRouter({
   store,
@@ -13,25 +24,114 @@ function createAuthRouter({
 }) {
   const router = express.Router()
 
+  // Public: the client needs these before it has a session in order to size
+  // its idle timer and warning countdown. No user data is exposed.
+  router.get('/session-config', (_req, res) => {
+    res.json(
+      responseEnvelope({
+        idleSeconds: SESSION_IDLE_SECONDS,
+        warningSeconds: SESSION_WARNING_SECONDS,
+        maxConcurrentSessions: MAX_CONCURRENT_SESSIONS,
+      }),
+    )
+  })
+
+  // Resolves the caller from either a normal access token (managing sessions
+  // while signed in) or a short-lived management token (login was blocked by
+  // the limit, so no access token exists yet).
+  const resolveSessionActor = (req) => {
+    const header = req.headers.authorization
+    if (!header?.startsWith('Bearer ')) return null
+    const token = header.slice(7)
+
+    try {
+      return authService.verifySessionManagementToken(token).sub
+    } catch {
+      // Not a management token; fall through to the normal access token.
+    }
+
+    try {
+      const payload = authService.verifyAccessToken(token)
+      return payload.sub
+    } catch {
+      return null
+    }
+  }
+
+  router.get('/sessions', protectedLimiter, async (req, res) => {
+    const userId = resolveSessionActor(req)
+    if (!userId) {
+      return res.status(401).json(
+        responseEnvelope(null, { code: 'UNAUTHORIZED', message: 'Not authorized' }),
+      )
+    }
+
+    try {
+      const sessions = await store.listActiveSessions(userId)
+      const currentToken = authService.decryptCookieValue(req.cookies?.vault_refresh_token)
+      const currentHash = currentToken ? hashToken(currentToken) : null
+
+      return res.json(
+        responseEnvelope({
+          maxSessions: MAX_CONCURRENT_SESSIONS,
+          sessions: sessions.map((session) => ({
+            id: session.id,
+            device: describeDevice(session.user_agent),
+            ipAddress: session.ip_address,
+            createdAt: session.created_at,
+            lastUsedAt: session.last_used_at,
+            isCurrent: currentHash !== null && session.token_hash === currentHash,
+          })),
+        }),
+      )
+    } catch {
+      return res.status(500).json(
+        responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Unable to list sessions' }),
+      )
+    }
+  })
+
+  router.delete('/sessions/:sessionId', protectedLimiter, async (req, res) => {
+    const userId = resolveSessionActor(req)
+    if (!userId) {
+      return res.status(401).json(
+        responseEnvelope(null, { code: 'UNAUTHORIZED', message: 'Not authorized' }),
+      )
+    }
+
+    try {
+      // Scoped by userId inside the store, so one account cannot end another's.
+      const revoked = await store.revokeSessionById({
+        sessionId: req.params.sessionId,
+        userId,
+      })
+
+      if (!revoked) {
+        return res.status(404).json(
+          responseEnvelope(null, {
+            code: 'NOT_FOUND',
+            message: 'Session not found or already ended',
+          }),
+        )
+      }
+
+      return res.json(responseEnvelope({ ended: true }))
+    } catch {
+      return res.status(500).json(
+        responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Unable to end session' }),
+      )
+    }
+  })
+
   router.post('/signup', authLimiter, async (req, res) => {
     try {
-      // debug: incoming signup
-      // eslint-disable-next-line no-console
-      console.log('[auth] signup request received')
       const payload = signupSchema.parse(req.body)
-      // eslint-disable-next-line no-console
-      console.log('[auth] payload validated for', payload.email)
       const passwordHash = await bcrypt.hash(payload.password, 12)
-      // eslint-disable-next-line no-console
-      console.log('[auth] password hashed')
       const user = await store.createUser({
         name: payload.name.trim(),
         email: payload.email,
         passwordHash,
       })
-
-      // eslint-disable-next-line no-console
-      console.log('[auth] store.createUser returned', user && user.id)
 
       if (!user) {
         return res.status(409).json(
@@ -110,9 +210,47 @@ function createAuthRouter({
         )
       }
 
+      // Concurrent-session limit. Enforced only after the password check, so
+      // this never reveals whether an account exists or is currently in use.
+      if (MAX_CONCURRENT_SESSIONS > 0) {
+        const activeSessions = await store.listActiveSessions(user.id)
+
+        if (activeSessions.length >= MAX_CONCURRENT_SESSIONS) {
+          return res.status(409).json(
+            responseEnvelope(null, {
+              code: 'SESSION_LIMIT_REACHED',
+              message:
+                `This account is already signed in on ${activeSessions.length} ` +
+                `device${activeSessions.length === 1 ? '' : 's'}. ` +
+                'End one of them to continue.',
+              details: {
+                activeCount: activeSessions.length,
+                maxSessions: MAX_CONCURRENT_SESSIONS,
+                // A short-lived token scoped to this decision. Without it the
+                // session list would be readable with only a password, and
+                // revocation would need an access token we cannot issue yet.
+                managementToken: authService.issueSessionManagementToken(user),
+                sessions: activeSessions.map((session) => ({
+                  id: session.id,
+                  device: describeDevice(session.user_agent),
+                  ipAddress: session.ip_address,
+                  createdAt: session.created_at,
+                  lastUsedAt: session.last_used_at,
+                })),
+              },
+            }),
+          )
+        }
+      }
+
       const accessToken = authService.issueAccessToken(user)
       const refreshToken = authService.issueRefreshToken(user)
-      await store.storeRefreshToken({ userId: user.id, token: refreshToken })
+      await store.storeRefreshToken({
+        userId: user.id,
+        token: refreshToken,
+        userAgent: req.headers['user-agent'],
+        ipAddress: clientIp(req),
+      })
       authService.setCsrfCookie(res, authService.issueCsrfToken())
       authService.setRefreshCookie(res, refreshToken)
 
@@ -195,6 +333,8 @@ function createAuthRouter({
       const nextRefreshToken = authService.issueRefreshToken(user)
       authService.setCsrfCookie(res, authService.issueCsrfToken())
       await store.rotateRefreshToken({
+        userAgent: req.headers['user-agent'],
+        ipAddress: clientIp(req),
         oldToken: currentRefreshToken,
         newToken: nextRefreshToken,
         userId: user.id,

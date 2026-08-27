@@ -1,0 +1,125 @@
+import { useRef, useState } from 'react'
+import { Camera, Trash2, Loader2 } from 'lucide-react'
+import { Avatar } from '../ui/avatar'
+
+const MAX_SOURCE_BYTES = 8 * 1024 * 1024 // reject huge originals before decoding
+const OUTPUT_SIZE = 256 // square, adequate for every size we display
+
+/**
+ * Downscale and centre-crop to a square, then encode as a data URI.
+ *
+ * Done client-side so a 5MB phone photo becomes ~30KB before it ever reaches
+ * the API — no storage bucket required, and the request stays small.
+ */
+function processImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(new Error('Could not read that file.'))
+    reader.onload = () => {
+      const image = new Image()
+      image.onerror = () => reject(new Error('That file is not a readable image.'))
+      image.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = OUTPUT_SIZE
+        canvas.height = OUTPUT_SIZE
+        const ctx = canvas.getContext('2d')
+
+        // Centre-crop the largest square that fits, so nothing is stretched.
+        const side = Math.min(image.width, image.height)
+        const sx = (image.width - side) / 2
+        const sy = (image.height - side) / 2
+        ctx.drawImage(image, sx, sy, side, side, 0, 0, OUTPUT_SIZE, OUTPUT_SIZE)
+
+        // JPEG keeps the payload small; transparency is not meaningful once
+        // the image is masked into a circle.
+        resolve(canvas.toDataURL('image/jpeg', 0.85))
+      }
+      image.src = reader.result
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+export function AvatarUpload({ user, profile, value, onChange, disabled }) {
+  const inputRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  const pick = async (event) => {
+    const file = event.target.files?.[0]
+    // Reset so re-picking the same file still fires a change event.
+    event.target.value = ''
+    if (!file) return
+
+    setError('')
+    if (!file.type.startsWith('image/')) {
+      setError('Please choose an image file.')
+      return
+    }
+    if (file.size > MAX_SOURCE_BYTES) {
+      setError('That image is over 8MB. Try a smaller one.')
+      return
+    }
+
+    setBusy(true)
+    try {
+      onChange(await processImage(file))
+    } catch (err) {
+      setError(err.message ?? 'Could not process that image.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="group relative">
+        <Avatar
+          user={user}
+          profile={{ ...profile, avatarUrl: value }}
+          className="h-28 w-28 text-3xl ring-2 ring-border"
+        />
+
+        {!disabled && (
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            aria-label="Change profile picture"
+            className="absolute inset-0 flex items-center justify-center rounded-full bg-black/55 text-white opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
+          >
+            {busy ? (
+              <Loader2 className="h-6 w-6 animate-spin" />
+            ) : (
+              <span className="flex flex-col items-center gap-1">
+                <Camera className="h-6 w-6" />
+                <span className="text-[10px] font-medium uppercase tracking-wide">
+                  {value ? 'Change' : 'Add'}
+                </span>
+              </span>
+            )}
+          </button>
+        )}
+
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          onChange={pick}
+          className="hidden"
+        />
+      </div>
+
+      {!disabled && value ? (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          className="inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-red-500"
+        >
+          <Trash2 className="h-3 w-3" /> Remove photo
+        </button>
+      ) : null}
+
+      {error ? <p className="max-w-[14rem] text-center text-xs text-red-500">{error}</p> : null}
+    </div>
+  )
+}

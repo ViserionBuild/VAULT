@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { useApi } from '../hooks/use-api'
 import { Dialog } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
-import { Select } from '../components/ui/select'
+import { PriorityRating } from '../components/ui/priority-rating'
 import { Button } from '../components/ui/button'
 import {
   createTodoList,
@@ -17,13 +17,6 @@ import {
 } from '../services/todo-services'
 import { TodoListPage } from './todo-list-page'
 import { TodoDetailsPage } from './todo-details-page'
-
-const priorities = [
-  { value: 0, label: 'None' },
-  { value: 1, label: 'Low' },
-  { value: 2, label: 'Medium' },
-  { value: 3, label: 'High' },
-]
 
 function toDateInputValue(value) {
   if (!value) return ''
@@ -60,55 +53,149 @@ function normalizeTargetDate(value) {
   return normalizeDueDate(value)
 }
 
+/** Today, formatted for a <input type="date">. */
+function todayInputValue() {
+  const now = new Date()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${now.getFullYear()}-${month}-${day}`
+}
+
+function shiftDays(days) {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${month}-${day}`
+}
+
+const DATE_PRESETS = [
+  { label: 'Today', get: () => todayInputValue() },
+  { label: 'Tomorrow', get: () => shiftDays(1) },
+  { label: 'Next week', get: () => shiftDays(7) },
+]
+
+/**
+ * Create/edit a list.
+ *
+ * Everything except the title is pre-filled with a sensible default — today's
+ * date and priority 4 — so the common case is: type a name, press Enter.
+ * Description and date only appear if the user asks for them.
+ */
 function TodoDialog({ open, onClose, onSubmit, initialTodo }) {
+  const isEdit = Boolean(initialTodo)
+
   const [title, setTitle] = useState(initialTodo?.title ?? '')
   const [description, setDescription] = useState(initialTodo?.description ?? '')
-  const [priority, setPriority] = useState(initialTodo?.priority ?? 0)
-  const [targetDate, setTargetDate] = useState(toDateInputValue(initialTodo?.targetDate))
+  // Defaults: today, and "Important" (4 of 5).
+  const [priority, setPriority] = useState(initialTodo?.priority ?? 4)
+  const [targetDate, setTargetDate] = useState(
+    initialTodo ? toDateInputValue(initialTodo.targetDate) : todayInputValue(),
+  )
+  const [showDetails, setShowDetails] = useState(Boolean(initialTodo?.description))
 
   const submit = () => {
     if (!title.trim()) return
     onSubmit({
       title: title.trim(),
-      description,
+      description: description.trim(),
       priority: Number(priority),
       targetDate: toApiDate(targetDate),
     })
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title={initialTodo ? 'Edit TODO' : 'New TODO'}>
-      <div className="space-y-3">
-        <Input
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          onKeyDown={(event) => event.key === 'Enter' && submit()}
-          placeholder="TODO title"
-          autoFocus
-        />
-        <textarea
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="Description"
-          className="min-h-24 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-        />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Priority</label>
-            <Select value={priority} onChange={(event) => setPriority(event.target.value)}>
-              {priorities.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </Select>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">Target date</label>
-            <Input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} />
+    <Dialog open={open} onClose={onClose} title={isEdit ? 'Edit list' : 'New list'}>
+      <div className="space-y-4">
+        <div>
+          <Input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            onKeyDown={(event) => event.key === 'Enter' && submit()}
+            placeholder="What needs doing?"
+            className="h-11 text-base"
+            autoFocus
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            Press Enter to save — everything below is optional.
+          </p>
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+            Priority
+          </label>
+          <PriorityRating value={priority} onChange={setPriority} />
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+            Target date
+          </label>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {DATE_PRESETS.map((preset) => {
+              const value = preset.get()
+              const active = targetDate === value
+              return (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => setTargetDate(active ? '' : value)}
+                  className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                    active
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              )
+            })}
+            <Input
+              type="date"
+              value={targetDate}
+              onChange={(event) => setTargetDate(event.target.value)}
+              className="h-8 w-auto text-xs"
+            />
+            {targetDate ? (
+              <button
+                type="button"
+                onClick={() => setTargetDate('')}
+                className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+              >
+                Clear
+              </button>
+            ) : null}
           </div>
         </div>
-        <div className="flex justify-end gap-2">
+
+        {showDetails ? (
+          <div>
+            <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
+              Description
+            </label>
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Any extra context"
+              className="min-h-20 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowDetails(true)}
+            className="text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            + Add a description
+          </button>
+        )}
+
+        <div className="flex justify-end gap-2 border-t border-border pt-3">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit}>{initialTodo ? 'Save' : 'Create'}</Button>
+          <Button onClick={submit} disabled={!title.trim()}>
+            {isEdit ? 'Save' : 'Create list'}
+          </Button>
         </div>
       </div>
     </Dialog>

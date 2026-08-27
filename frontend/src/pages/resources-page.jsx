@@ -8,7 +8,8 @@ import { useWorkspace } from '../contexts/workspace-context'
 import { Button } from '../components/ui/button'
 import { Breadcrumbs } from '../components/resources/breadcrumbs'
 import { ViewToggle } from '../components/resources/view-toggle'
-import { ResourceCard, ResourceListItem, ResourceTable } from '../components/resources/resource-views'
+import { ResourceCard, ResourceListItem, ResourceListHeader, ResourceTable } from '../components/resources/resource-views'
+import { ResourceSearch } from '../components/resources/resource-search'
 import { CreateFolderDialog } from '../components/resources/create-folder-dialog'
 import { AddResourceDialog } from '../components/resources/add-resource-dialog'
 import { EditItemDialog } from '../components/resources/edit-item-dialog'
@@ -158,6 +159,49 @@ export function ResourcesPage() {
     fetchItems()
   }
 
+  // Workspace-wide search. useCallback because ResourceSearch depends on it in
+  // an effect; a new identity each render would retrigger the search.
+  const handleSearch = useCallback(
+    async (query) => {
+      if (!activeWorkspace) return []
+      const params = new URLSearchParams({ q: query, workspaceId: activeWorkspace.id })
+      const data = await api(`/items/search?${params}`)
+      return data.items ?? []
+    },
+    [api, activeWorkspace],
+  )
+
+  // Opening a folder hit navigates into it; a link hit opens as usual.
+  const handleOpenSearchResult = (item) => {
+    if (item.type === 'folder') {
+      setCurrentFolder(item.id)
+      return
+    }
+    handleOpen(item)
+  }
+
+  // Select-all state, shared by the list header and the table header.
+  const allSelected = items.length > 0 && selectedIds.length === items.length
+  const someSelected = selectedIds.length > 0 && !allSelected
+  const handleToggleAll = () => {
+    setSelectedIds(allSelected ? [] : items.map((item) => item.id))
+  }
+
+  // Grid view groups folders above files, preserving the active sort order.
+  const gridFolders = items.filter((item) => item.type === 'folder')
+  const gridFiles = items.filter((item) => item.type !== 'folder')
+
+  // Toggles one grid section without disturbing selections in the other.
+  const handleToggleGroup = (groupItems) => {
+    const groupIds = groupItems.map((item) => item.id)
+    const allChosen = groupIds.every((id) => selectedIds.includes(id))
+    setSelectedIds((prev) =>
+      allChosen
+        ? prev.filter((id) => !groupIds.includes(id))
+        : [...new Set([...prev, ...groupIds])],
+    )
+  }
+
   const handleSort = (field) => {
     if (sortBy === field) {
       setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))
@@ -214,20 +258,31 @@ export function ResourcesPage() {
   return (
     <section className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Resources</h1>
-          <Breadcrumbs breadcrumbs={breadcrumbs} onNavigate={handleNavigate} />
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight">Resources</h1>
+            <Breadcrumbs breadcrumbs={breadcrumbs} onNavigate={handleNavigate} />
+          </div>
+
+          {/* Actions wrap rather than overflow on narrow screens */}
+          <div className="flex flex-wrap items-center gap-2">
+            <ViewToggle activeView={view} onViewChange={setView} />
+            <Button size="sm" variant="outline" onClick={() => setShowCreateFolder(true)}>
+              <FolderPlus className="mr-1.5 h-4 w-4" />
+              <span className="hidden xs:inline">Folder</span>
+              <span className="xs:hidden">New</span>
+            </Button>
+            <Button size="sm" onClick={() => setShowAddResource(true)}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              <span className="hidden xs:inline">Resource</span>
+              <span className="xs:hidden">Add</span>
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <ViewToggle activeView={view} onViewChange={setView} />
-          <Button size="sm" variant="outline" onClick={() => setShowCreateFolder(true)}>
-            <FolderPlus className="mr-1.5 h-4 w-4" /> Folder
-          </Button>
-          <Button size="sm" onClick={() => setShowAddResource(true)}>
-            <Plus className="mr-1.5 h-4 w-4" /> Resource
-          </Button>
-        </div>
+
+        {/* Spans the full content width, like Drive's search bar */}
+        <ResourceSearch onSearch={handleSearch} onOpenResult={handleOpenSearchResult} />
       </div>
 
       {/* Loading */}
@@ -266,30 +321,74 @@ export function ResourcesPage() {
         </div>
       )}
 
-      {/* Grid View */}
+      {/* Grid View - folders and files in separate sections, like Drive */}
       {view === 'grid' && items.length > 0 && (
-        <div className="grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(80px,1fr))]">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              className="aspect-square"
-            >
-              <ResourceCard
-                item={item}
-                onOpen={handleOpen}
-                onContextMenu={handleContextMenu}
-                onFavorite={handleFavorite}
-                isSelected={selectedIds.includes(item.id)}
-                onSelect={handleSelect}
+        <div className="space-y-6">
+          {gridFolders.length > 0 && (
+            <div>
+              <GridSectionHeader
+                label="Folders"
+                items={gridFolders}
+                selectedIds={selectedIds}
+                onToggleGroup={handleToggleGroup}
+                addLabel="New folder"
+                onAdd={() => setShowCreateFolder(true)}
               />
+              <div className="grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]">
+                {gridFolders.map((item) => (
+                  <ResourceCard
+                    key={item.id}
+                    item={item}
+                    onOpen={handleOpen}
+                    onContextMenu={handleContextMenu}
+                    onFavorite={handleFavorite}
+                    isSelected={selectedIds.includes(item.id)}
+                    onSelect={handleSelect}
+                  />
+                ))}
+              </div>
             </div>
-          ))}
+          )}
+
+          {gridFiles.length > 0 && (
+            <div>
+              <GridSectionHeader
+                label="Files"
+                items={gridFiles}
+                selectedIds={selectedIds}
+                onToggleGroup={handleToggleGroup}
+                addLabel="Add resource"
+                onAdd={() => setShowAddResource(true)}
+              />
+              <div className="grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]">
+                {gridFiles.map((item) => (
+                  <ResourceCard
+                    key={item.id}
+                    item={item}
+                    onOpen={handleOpen}
+                    onContextMenu={handleContextMenu}
+                    onFavorite={handleFavorite}
+                    isSelected={selectedIds.includes(item.id)}
+                    onSelect={handleSelect}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* List View */}
       {view === 'list' && items.length > 0 && (
-        <div className="space-y-2">
+        <div className="rounded-lg border border-border">
+          <ResourceListHeader
+            onSort={handleSort}
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+            allSelected={allSelected}
+            someSelected={someSelected}
+            onToggleAll={handleToggleAll}
+          />
           {items.map((item) => (
             <ResourceListItem
               key={item.id}
@@ -306,6 +405,7 @@ export function ResourcesPage() {
 
       {/* Table View */}
       {view === 'table' && items.length > 0 && (
+        <div className="rounded-lg border border-border">
         <ResourceTable
           items={items}
           onOpen={handleOpen}
@@ -317,6 +417,7 @@ export function ResourcesPage() {
           sortBy={sortBy}
           sortOrder={sortOrder}
         />
+        </div>
       )}
 
       {/* Bulk Action Bar */}
@@ -364,5 +465,54 @@ export function ResourcesPage() {
         workspaceId={activeWorkspace?.id}
       />
     </section>
+  )
+}
+
+/**
+ * Section heading for the grid view: a select-all checkbox scoped to this
+ * group, the label with a count, and an add button for the matching type.
+ */
+function GridSectionHeader({ label, items, selectedIds, onToggleGroup, addLabel, onAdd }) {
+  const selectedCount = items.filter((item) => selectedIds.includes(item.id)).length
+  const allSelected = items.length > 0 && selectedCount === items.length
+  const someSelected = selectedCount > 0 && !allSelected
+
+  return (
+    <div className="group/section mb-2 flex items-center gap-2">
+      <input
+        type="checkbox"
+        checked={allSelected}
+        ref={(el) => {
+          // indeterminate is a property, not an attribute.
+          if (el) el.indeterminate = someSelected
+        }}
+        onChange={() => onToggleGroup(items)}
+        aria-label={`Select all ${label.toLowerCase()}`}
+        className={`h-3.5 w-3.5 cursor-pointer rounded border-border accent-primary transition-opacity focus-visible:opacity-100 group-hover/section:pointer-events-auto group-hover/section:opacity-100 ${
+          // Stay visible while anything in the group is selected, so the
+          // control that produced the selection does not vanish. Hidden state
+          // also ignores clicks, so invisible space is not a hit target.
+          selectedCount > 0 ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      />
+
+      <h2 className="text-xs font-medium text-muted-foreground">
+        {label}
+        <span className="ml-1.5 text-muted-foreground/60">
+          {selectedCount > 0 ? `${selectedCount} of ${items.length}` : items.length}
+        </span>
+      </h2>
+
+      <button
+        type="button"
+        onClick={onAdd}
+        title={addLabel}
+        aria-label={addLabel}
+        className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">{addLabel}</span>
+      </button>
+    </div>
   )
 }

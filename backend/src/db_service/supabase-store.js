@@ -188,6 +188,54 @@ function mapTodoTaskRow(row) {
   }
 }
 
+// Maps snake_case profile columns to the camelCase API shape.
+const PROFILE_COLUMNS = {
+  avatar_url: 'avatarUrl',
+  display_name: 'displayName',
+  bio: 'bio',
+  phone: 'phone',
+  address_line1: 'addressLine1',
+  address_line2: 'addressLine2',
+  city: 'city',
+  state: 'state',
+  postal_code: 'postalCode',
+  country: 'country',
+  timezone: 'timezone',
+}
+
+function mapProfileRow(row) {
+  if (!row) return null
+  const profile = { userId: row.user_id, createdAt: row.created_at, updatedAt: row.updated_at }
+  for (const [column, key] of Object.entries(PROFILE_COLUMNS)) {
+    profile[key] = row[column] ?? null
+  }
+  return profile
+}
+
+let warnedMissingProfilesTable = false
+function warnMissingProfilesTable() {
+  if (warnedMissingProfilesTable) return
+  warnedMissingProfilesTable = true
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[store] user_profiles table is missing; profile details are unavailable ' +
+      'until 20260828_user_profiles.sql is applied.',
+  )
+}
+
+// The session-metadata migration may not be applied yet. Warn once rather than
+// on every request, so logs stay readable.
+let warnedMissingSessionColumns = false
+function warnMissingSessionColumns() {
+  if (warnedMissingSessionColumns) return
+  warnedMissingSessionColumns = true
+  // eslint-disable-next-line no-console
+  console.warn(
+    '[store] refresh_tokens is missing session columns; the concurrent-session ' +
+      'limit is INACTIVE until 20260828_session_device_metadata.sql is applied.',
+  )
+}
+
 class SupabaseStore {
   constructor(client) {
     this.client = client
@@ -196,6 +244,18 @@ class SupabaseStore {
   // Users
   async createUser({ name, email, passwordHash }) {
     const normalizedEmail = email.trim().toLowerCase()
+
+    // Pre-check gives a clean 409 even if the unique index is not yet applied.
+    // The index below is what actually guarantees correctness under races.
+    const { data: existing, error: lookupError } = await this.client
+      .from('users')
+      .select('id')
+      .eq('email', normalizedEmail)
+      .limit(1)
+
+    if (lookupError) throw lookupError
+    if (existing && existing.length > 0) return null
+
     const { data, error } = await this.client
       .from('users')
       .insert({ name, email: normalizedEmail, password_hash: passwordHash })
@@ -203,6 +263,8 @@ class SupabaseStore {
       .single()
 
     if (error) {
+      // 23505 = unique_violation. Two concurrent signups can both clear the
+      // pre-check above; the database is the authority that settles the race.
       if (error.code === '23505') {
         return null
       }
@@ -222,13 +284,26 @@ class SupabaseStore {
 
   async findUserByEmail(email) {
     const normalizedEmail = email.trim().toLowerCase()
+    // Ordered by created_at so the row returned is deterministic. A unique
+    // index on lower(trim(email)) makes duplicates impossible going forward,
+    // but ordering keeps login stable for any that predate it.
     const { data, error } = await this.client
       .from('users')
       .select('*')
       .eq('email', normalizedEmail)
-      .limit(1)
+      .order('created_at', { ascending: true })
+      .limit(2)
 
     if (error) throw error
+
+    if (data && data.length > 1) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[store] ${data.length}+ accounts share email ${normalizedEmail}; ` +
+          'using the oldest. Apply the users_email_unique_idx migration.',
+      )
+    }
+
     return mapUserRow(data?.[0])
   }
 
@@ -249,9 +324,69 @@ class SupabaseStore {
     return data ?? []
   }
 
+  // User profiles
+  async getUserProfile(userId) {
+    const { data, error } = await this.client
+      .from('user_profiles')
+      .select('*')
+      .eq('user_id', String(userId))
+      .limit(1)
+
+    if (error) {
+      // Missing table: migration not applied yet. PostgREST reports PGRST205
+      // from its schema cache; 42P01 is the raw Postgres code. Return an empty
+      // profile so the page renders rather than 500ing.
+      if (error.code === 'PGRST205' || error.code === '42P01') {
+        warnMissingProfilesTable()
+        return null
+      }
+      throw error
+    }
+
+    return data?.[0] ? mapProfileRow(data[0]) : null
+  }
+
+  async upsertUserProfile(userId, fields) {
+    const payload = { user_id: String(userId) }
+    // Only assign keys the caller actually supplied, so a partial update
+    // cannot blank out fields it did not mention.
+    for (const [column, value] of Object.entries(PROFILE_COLUMNS)) {
+      if (fields[value] !== undefined) payload[column] = fields[value]
+    }
+
+    const { data, error } = await this.client
+      .from('user_profiles')
+      .upsert(payload, { onConflict: 'user_id' })
+      .select('*')
+      .single()
+
+    if (error) {
+      if (error.code === 'PGRST205' || error.code === '42P01') {
+        warnMissingProfilesTable()
+        return null
+      }
+      throw error
+    }
+
+    return mapProfileRow(data)
+  }
+
+  async updateUserName(userId, name) {
+    const { data, error } = await this.client
+      .from('users')
+      .update({ name })
+      .eq('id', String(userId))
+      .select('*')
+      .single()
+
+    if (error) throw error
+    return mapUserRow(data)
+  }
+
   // Refresh tokens
-  async storeRefreshToken({ userId, token }) {
+  async storeRefreshToken({ userId, token, userAgent, ipAddress }) {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+    const nowIso = new Date().toISOString()
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000).toISOString()
 
     const { error } = await this.client.from('refresh_tokens').insert({
@@ -259,14 +394,104 @@ class SupabaseStore {
       user_id: String(userId),
       revoked_at: null,
       expires_at: expiresAt,
+      // Display-only context so a user can recognize their own sessions.
+      user_agent: userAgent ?? null,
+      ip_address: ipAddress ?? null,
+      last_used_at: nowIso,
     })
 
-    if (error) throw error
+    if (error) {
+      // Same pre-migration fallback: fall back to the original column set so
+      // login still works, just without device metadata.
+      if (error.code === '42703' || error.code === 'PGRST204') {
+        const { error: retryError } = await this.client.from('refresh_tokens').insert({
+          token_hash: tokenHash,
+          user_id: String(userId),
+          revoked_at: null,
+          expires_at: expiresAt,
+        })
+        if (retryError) throw retryError
+        return
+      }
+      throw error
+    }
   }
 
-  async rotateRefreshToken({ oldToken, newToken, userId }) {
+  // Active = not revoked and not expired. This is the definition the session
+  // limit enforces, so listing and counting must agree exactly.
+  async listActiveSessions(userId) {
+    const nowIso = new Date().toISOString()
+    const { data, error } = await this.client
+      .from('refresh_tokens')
+      .select('id, token_hash, user_agent, ip_address, created_at, last_used_at, expires_at')
+      .eq('user_id', String(userId))
+      .is('revoked_at', null)
+      .gt('expires_at', nowIso)
+      .order('last_used_at', { ascending: false })
+
+    if (error) {
+      // 42703 = undefined_column: the device-metadata migration has not been
+      // applied yet. Report "no sessions" rather than throwing, so that a
+      // code-before-migration deploy cannot lock every user out of login.
+      if (error.code === '42703') {
+        warnMissingSessionColumns()
+        return []
+      }
+      throw error
+    }
+
+    return data ?? []
+  }
+
+  async countActiveSessions(userId) {
+    const sessions = await this.listActiveSessions(userId)
+    return sessions.length
+  }
+
+  async revokeSessionById({ sessionId, userId }) {
+    // Scoped by user_id so one account can never revoke another's session.
+    const { data, error } = await this.client
+      .from('refresh_tokens')
+      .update({ revoked_at: new Date().toISOString() })
+      .eq('id', sessionId)
+      .eq('user_id', String(userId))
+      .is('revoked_at', null)
+      .select('id')
+
+    if (error) {
+      // Pre-migration there is no id column, so no session can be addressed.
+      // Report "not found" rather than a 500; listActiveSessions returns an
+      // empty list in the same state, so nothing can reach here legitimately.
+      if (error.code === '42703' || error.code === 'PGRST204') {
+        warnMissingSessionColumns()
+        return false
+      }
+      throw error
+    }
+
+    return (data ?? []).length > 0
+  }
+
+  async touchRefreshToken(token) {
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
+    const { error } = await this.client
+      .from('refresh_tokens')
+      .update({ last_used_at: new Date().toISOString() })
+      .eq('token_hash', tokenHash)
+
+    if (error) {
+      // Activity tracking is cosmetic; never fail a request over it.
+      if (error.code === '42703' || error.code === 'PGRST204') {
+        warnMissingSessionColumns()
+        return
+      }
+      throw error
+    }
+  }
+
+  async rotateRefreshToken({ oldToken, newToken, userId, userAgent, ipAddress }) {
     await this.revokeRefreshToken(oldToken)
-    await this.storeRefreshToken({ userId, token: newToken })
+    await this.storeRefreshToken({ userId, token: newToken, userAgent, ipAddress })
   }
 
   async findValidRefreshToken(token) {
@@ -429,6 +654,98 @@ class SupabaseStore {
 
   async getNoteById(noteId, userId) {
     return this._fetchNoteEntry(noteId, userId)
+  }
+
+  /**
+   * Workspace-wide note search across folder titles, note titles, and note
+   * bodies. Mirrors searchItems so both tabs behave the same.
+   */
+  async searchNotes({ userId, workspaceId, query, limit = 50 }) {
+    const term = String(query ?? '').trim()
+    if (!term) return []
+
+    // Escape pattern wildcards and drop PostgREST filter separators.
+    const escaped = term.replace(/[%_\\]/g, (c) => `\\${c}`).replace(/[(),]/g, ' ')
+    const pattern = `%${escaped}%`
+
+    const tables = ['notes_folders', 'notes']
+    const responses = await Promise.all(
+      tables.map((table) => {
+        // Folders carry a description; notes carry body content.
+        const columns =
+          table === 'notes_folders'
+            ? `title.ilike.${pattern},description.ilike.${pattern}`
+            : `title.ilike.${pattern},content.ilike.${pattern}`
+
+        return this.client
+          .from(table)
+          .select('*')
+          .eq('user_id', String(userId))
+          .eq('workspace_id', String(workspaceId))
+          .eq('is_deleted', false)
+          .or(columns)
+          .limit(limit)
+      }),
+    )
+
+    for (const response of responses) {
+      if (response.error) throw response.error
+    }
+
+    const items = responses.flatMap((response, index) =>
+      (response.data ?? []).map((row) =>
+        tables[index] === 'notes_folders' ? mapNoteFolderRow(row) : mapNoteRow(row),
+      ),
+    )
+
+    const lowered = term.toLowerCase()
+    const score = (item) => {
+      const title = (item.title ?? '').toLowerCase()
+      if (title === lowered) return 0
+      if (title.startsWith(lowered)) return 1
+      if (title.includes(lowered)) return 2
+      return 3
+    }
+
+    return items
+      .sort((left, right) => {
+        const diff = score(left) - score(right)
+        if (diff !== 0) return diff
+        return (left.title ?? '').localeCompare(right.title ?? '')
+      })
+      .slice(0, limit)
+  }
+
+  /** Note-folder id -> path segments, for labelling search results. */
+  async getNotesFolderPathMap({ userId, workspaceId }) {
+    const { data, error } = await this.client
+      .from('notes_folders')
+      .select('id, title, parent_id')
+      .eq('user_id', String(userId))
+      .eq('workspace_id', String(workspaceId))
+      .eq('is_deleted', false)
+
+    if (error) throw error
+
+    const byId = new Map((data ?? []).map((row) => [String(row.id), row]))
+    const cache = new Map()
+
+    const pathFor = (id, seen = new Set()) => {
+      const key = String(id)
+      if (cache.has(key)) return cache.get(key)
+      const row = byId.get(key)
+      if (!row) return []
+      if (seen.has(key)) return []
+      seen.add(key)
+      const parentPath = row.parent_id ? pathFor(row.parent_id, seen) : []
+      const full = [...parentPath, row.title]
+      cache.set(key, full)
+      return full
+    }
+
+    const paths = new Map()
+    for (const key of byId.keys()) paths.set(key, pathFor(key))
+    return paths
   }
 
   async getNotesByParent({ parentId, userId, workspaceId, sortBy, sortOrder }) {
@@ -1215,9 +1532,19 @@ class SupabaseStore {
 
   _sortItems(items, sortBy, sortOrder) {
     const ascending = sortOrder !== 'desc'
-    const typeRank = { folder: 0, url: 1 }
+    // Folders first; every non-folder ranks equally after them. Notes use
+    // type 'note', resources use 'url', so default rather than enumerate.
+    const rankOf = (type) => (type === 'folder' ? 0 : 1)
 
     return items.sort((left, right) => {
+      // Folders always precede files, whatever the sort column — the way Drive
+      // behaves. Sorting by `type` explicitly is the one exception, since there
+      // the user is asking for type to be the ordering.
+      if (sortBy !== 'type') {
+        const groupComparison = compareValues(rankOf(left.type), rankOf(right.type), true)
+        if (groupComparison !== 0) return groupComparison
+      }
+
       let comparison = 0
 
       if (sortBy === 'title') {
@@ -1229,7 +1556,7 @@ class SupabaseStore {
       } else if (sortBy === 'deletedAt') {
         comparison = compareValues(left.deletedAt, right.deletedAt, ascending)
       } else if (sortBy === 'type') {
-        comparison = compareValues(typeRank[left.type], typeRank[right.type], ascending)
+        comparison = compareValues(rankOf(left.type), rankOf(right.type), ascending)
       } else {
         comparison = compareValues(left.position ?? 0, right.position ?? 0, ascending)
       }
@@ -1239,7 +1566,7 @@ class SupabaseStore {
       const positionComparison = compareValues(left.position ?? 0, right.position ?? 0, true)
       if (positionComparison !== 0) return positionComparison
 
-      const typeComparison = compareValues(typeRank[left.type], typeRank[right.type], true)
+      const typeComparison = compareValues(rankOf(left.type), rankOf(right.type), true)
       if (typeComparison !== 0) return typeComparison
 
       return compareValues(left.title?.toLowerCase(), right.title?.toLowerCase(), true)
@@ -1316,6 +1643,67 @@ class SupabaseStore {
   async getItemById(itemId, userId) {
     const { item } = await this._fetchItemEntry(itemId, userId)
     return item
+  }
+
+  // Workspace-wide search across folders and links, matching title, URL, and
+  // description. Deliberately ignores the current folder: Drive-style search
+  // looks everywhere, and results carry their own path for context.
+  async searchItems({ userId, workspaceId, query, limit = 50 }) {
+    const term = String(query ?? '').trim()
+    if (!term) return []
+
+    // Escape PostgREST pattern wildcards, and drop its filter separators, so a
+    // literal % or , in a query cannot alter the filter it is spliced into.
+    const escaped = term.replace(/[%_\\]/g, (c) => `\\${c}`).replace(/[(),]/g, ' ')
+    const pattern = `%${escaped}%`
+
+    const tables = ['folders', 'files']
+    const responses = await Promise.all(
+      tables.map((table) => {
+        // Folders have no url column; only files match on it.
+        const columns =
+          table === 'folders'
+            ? `title.ilike.${pattern},description.ilike.${pattern}`
+            : `title.ilike.${pattern},description.ilike.${pattern},url.ilike.${pattern}`
+
+        return this.client
+          .from(table)
+          .select('*')
+          .eq('user_id', String(userId))
+          .eq('workspace_id', String(workspaceId))
+          .eq('is_deleted', false)
+          .or(columns)
+          .limit(limit)
+      }),
+    )
+
+    for (const response of responses) {
+      if (response.error) throw response.error
+    }
+
+    const items = responses.flatMap((response, index) =>
+      (response.data ?? []).map((row) =>
+        tables[index] === 'folders' ? mapFolderRow(row) : mapFileRow(row),
+      ),
+    )
+
+    // Rank by how well the title matches, so exact and prefix hits lead.
+    const lowered = term.toLowerCase()
+    const score = (item) => {
+      const title = (item.title ?? '').toLowerCase()
+      if (title === lowered) return 0
+      if (title.startsWith(lowered)) return 1
+      if (title.includes(lowered)) return 2
+      return 3
+    }
+
+    return items
+      .sort((left, right) => {
+        const diff = score(left) - score(right)
+        if (diff !== 0) return diff
+        return (left.title ?? '').localeCompare(right.title ?? '')
+      })
+      .slice(0, limit)
   }
 
   async getItemsByParent({ parentId, userId, workspaceId, type, sortBy, sortOrder }) {
@@ -1609,6 +1997,44 @@ class SupabaseStore {
     )
   }
 
+  /**
+   * Folder id -> "Parent / Child" path for a whole workspace, in one query.
+   * getBreadcrumbs walks ancestors one query per level; calling it per search
+   * result multiplied that across the result set.
+   */
+  async getFolderPathMap({ userId, workspaceId }) {
+    const { data, error } = await this.client
+      .from('folders')
+      .select('id, title, parent_id')
+      .eq('user_id', String(userId))
+      .eq('workspace_id', String(workspaceId))
+      .eq('is_deleted', false)
+
+    if (error) throw error
+
+    const byId = new Map((data ?? []).map((row) => [String(row.id), row]))
+    const cache = new Map()
+
+    const pathFor = (id, seen = new Set()) => {
+      const key = String(id)
+      if (cache.has(key)) return cache.get(key)
+      const row = byId.get(key)
+      if (!row) return []
+      // Guard against a cycle from corrupt parent links.
+      if (seen.has(key)) return []
+      seen.add(key)
+
+      const parentPath = row.parent_id ? pathFor(row.parent_id, seen) : []
+      const full = [...parentPath, row.title]
+      cache.set(key, full)
+      return full
+    }
+
+    const paths = new Map()
+    for (const key of byId.keys()) paths.set(key, pathFor(key))
+    return paths
+  }
+
   async getBreadcrumbs(itemId, userId) {
     const crumbs = []
     let currentId = String(itemId)
@@ -1743,6 +2169,42 @@ class SupabaseStore {
 
     if (error) throw error
     return true
+  }
+
+  /**
+   * Tags for many items in two queries total, rather than two per item.
+   * The per-item version is an N+1: on a 34-item listing it issued 68 round
+   * trips, and against a remote database each costs ~200ms of latency.
+   * Returns a Map of itemId -> tags[].
+   */
+  async getTagsForItems(itemIds) {
+    const ids = (itemIds ?? []).map(String).filter(Boolean)
+    const byItem = new Map(ids.map((id) => [id, []]))
+    if (ids.length === 0) return byItem
+
+    const { data: links, error: linkError } = await this.client
+      .from('item_tags')
+      .select('item_id, tag_id')
+      .in('item_id', ids)
+
+    if (linkError) throw linkError
+    if (!links || links.length === 0) return byItem
+
+    const tagIds = [...new Set(links.map((link) => link.tag_id))]
+    const { data: tags, error: tagError } = await this.client
+      .from('tags')
+      .select('*')
+      .in('id', tagIds)
+
+    if (tagError) throw tagError
+
+    const tagsById = new Map((tags ?? []).map((row) => [String(row.id), mapTagRow(row)]))
+    for (const link of links) {
+      const tag = tagsById.get(String(link.tag_id))
+      if (tag) byItem.get(String(link.item_id))?.push(tag)
+    }
+
+    return byItem
   }
 
   async getTagsForItem(itemId) {

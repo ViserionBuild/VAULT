@@ -19,7 +19,59 @@ function createItemsRouter({ store, authMiddleware, metadataService }) {
     return { ...item, tags }
   }
 
-  const enrichItemsWithTags = async (items) => Promise.all(items.map(enrichItemWithTags))
+  // Batched: two queries for the whole list instead of two per item.
+  const enrichItemsWithTags = async (items) => {
+    if (!items || items.length === 0) return []
+    const tagsByItem = await store.getTagsForItems(items.map((item) => item.id))
+    return items.map((item) => ({ ...item, tags: tagsByItem.get(String(item.id)) ?? [] }))
+  }
+
+  // Workspace-wide search. Separate from GET / because it ignores parentId and
+  // returns a path for each hit rather than breadcrumbs for one folder.
+  router.get('/search', authMiddleware, async (req, res) => {
+    try {
+      const { q, workspaceId } = req.query
+
+      if (!workspaceId) {
+        return res.status(400).json(
+          responseEnvelope(null, {
+            code: 'VALIDATION_ERROR',
+            message: 'workspaceId query parameter is required',
+          }),
+        )
+      }
+
+      const query = String(q ?? '').trim()
+      if (!query) {
+        return res.json(responseEnvelope({ items: [], query: '' }))
+      }
+
+      const items = await store.searchItems({
+        userId: req.user.id,
+        workspaceId,
+        query,
+      })
+
+      // Tags and paths both resolve in a fixed number of queries, independent
+      // of how many results matched.
+      const [enriched, folderPaths] = await Promise.all([
+        enrichItemsWithTags(items),
+        store.getFolderPathMap({ userId: req.user.id, workspaceId }),
+      ])
+
+      // Each hit shows where it lives, the way Drive labels search results.
+      const withPaths = enriched.map((item) => {
+        const names = item.parentId ? (folderPaths.get(String(item.parentId)) ?? []) : []
+        return { ...item, path: ['Resources', ...names].join(' / ') }
+      })
+
+      return res.json(responseEnvelope({ items: withPaths, query }))
+    } catch {
+      return res.status(500).json(
+        responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Search failed' }),
+      )
+    }
+  })
 
   router.get('/', authMiddleware, async (req, res) => {
     try {

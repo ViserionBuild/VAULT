@@ -42,11 +42,27 @@
   @apply border-border;
 }
 
+html {
+  /* Never scroll the page sideways: a stray wide child should be clipped or
+     scroll within its own container, not shift the whole layout. */
+  overflow-x: hidden;
+}
+
 body {
   @apply bg-background text-foreground antialiased;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   margin: 0;
   min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* Long URLs and unbroken strings are the usual cause of mobile overflow. */
+a,
+p,
+h1,
+h2,
+h3 {
+  overflow-wrap: break-word;
 }
 
 /* ── Scrollbar ─────────────────────────────────────────────────── */
@@ -137,4 +153,58 @@ body {
 .no-select {
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* ── Note content ──────────────────────────────────────────────────
+   One ruleset shared by the editor and the reading view, so a note looks
+   identical in both. Without this, block elements inherit no spacing and a
+   saved note renders as an undifferentiated wall of text. */
+.note-content {
+  line-height: 1.6;
+  word-break: break-word;
+}
+.note-content:focus { outline: none; }
+.note-content h1 { font-size: 1.5rem; font-weight: 700; margin: 1rem 0 0.5rem; }
+.note-content h2 { font-size: 1.25rem; font-weight: 600; margin: 0.875rem 0 0.5rem; }
+.note-content h3 { font-size: 1.1rem; font-weight: 600; margin: 0.75rem 0 0.375rem; }
+.note-content p { margin: 0.5rem 0; }
+.note-content ul { list-style: disc; padding-left: 1.5rem; margin: 0.5rem 0; }
+.note-content ol { list-style: decimal; padding-left: 1.5rem; margin: 0.5rem 0; }
+.note-content li { margin: 0.125rem 0; }
+.note-content a { color: hsl(var(--primary)); text-decoration: underline; }
+.note-content blockquote {
+  border-left: 3px solid hsl(var(--border));
+  padding-left: 0.875rem;
+  margin: 0.75rem 0;
+  color: hsl(var(--muted-foreground));
+}
+.note-content pre {
+  background: hsl(var(--muted));
+  padding: 0.75rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  margin: 0.75rem 0;
+}
+.note-content code {
+  background: hsl(var(--muted));
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.25rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+}
+.note-content pre code { background: none; padding: 0; }
+.note-content hr { border: none; border-top: 1px solid hsl(var(--border)); margin: 1rem 0; }
+.note-content img { max-width: 100%; height: auto; border-radius: 0.375rem; }
+.note-content table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; }
+.note-content th, .note-content td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.375rem 0.5rem;
+  text-align: left;
+}
+.note-content input[type="checkbox"] { margin-right: 0.25rem; vertical-align: middle; }
+.note-content:empty::before {
+  content: attr(data-placeholder);
+  color: hsl(var(--muted-foreground));
 }

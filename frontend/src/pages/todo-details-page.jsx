@@ -1,20 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ArrowLeft, Check, Circle, Copy, Edit3, ListChecks,
-  Plus, RefreshCw, X
+  CalendarDays, Check, ChevronLeft, Copy,
+  Edit3, ListChecks, Plus, RefreshCw, Trash2,
 } from 'lucide-react'
 
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
-import { Select } from '../components/ui/select'
-
-const priorities = [
-  { value: 0, label: 'None' },
-  { value: 1, label: 'Low' },
-  { value: 2, label: 'Medium' },
-  { value: 3, label: 'High' },
-]
+import { PriorityRating, PRIORITY_LABELS } from '../components/ui/priority-rating'
 
 function formatDate(value) {
   if (!value) return 'Not set'
@@ -23,9 +16,6 @@ function formatDate(value) {
   )
 }
 
-function priorityLabel(value) {
-  return priorities.find((priority) => priority.value === Number(value))?.label ?? 'None'
-}
 
 function toDateInputValue(value) {
   if (!value) return ''
@@ -45,21 +35,7 @@ function toApiDate(value) {
   return new Date(`${value}T12:00:00Z`).toISOString()
 }
 
-function ProgressBar({ completed, total }) {
-  const percent = total > 0 ? Math.round((completed / total) * 100) : 0
 
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>{completed}/{total} tasks completed</span>
-        <span>{percent}%</span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-muted">
-        <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${percent}%` }} />
-      </div>
-    </div>
-  )
-}
 
 export function TodoDetailsPage({
   currentTodo,
@@ -70,29 +46,12 @@ export function TodoDetailsPage({
   onUpdateTask,
   onDeleteTask,
   onDuplicateTask,
-  onReorderTask,
 }) {
   const navigate = useNavigate()
   const [activeEditor, setActiveEditor] = useState(null)
-  const [dragState, setDragState] = useState({ draggingId: null, overId: null })
-
-  const startCreate = () => {
-    setActiveEditor({
-      mode: 'create',
-      taskId: null,
-      draft: {
-        title: '',
-        description: '',
-        priority: 0,
-        dueDate: '',
-        completed: false,
-      },
-    })
-  }
 
   const startEdit = (task) => {
     setActiveEditor({
-      mode: 'edit',
       taskId: task.id,
       draft: {
         title: task.title ?? '',
@@ -104,289 +63,398 @@ export function TodoDetailsPage({
     })
   }
 
-  const cancelEdit = () => setActiveEditor(null)
-
   const updateDraft = (field, value) => {
     setActiveEditor((prev) => (prev ? { ...prev, draft: { ...prev.draft, [field]: value } } : prev))
   }
 
   const submitDraft = async () => {
     if (!activeEditor?.draft?.title?.trim()) return
-    const payload = {
+    await onUpdateTask(activeEditor.taskId, {
       title: activeEditor.draft.title.trim(),
       description: activeEditor.draft.description?.trim() ?? '',
       priority: Number(activeEditor.draft.priority) || 0,
       dueDate: toApiDate(activeEditor.draft.dueDate),
       completed: Boolean(activeEditor.draft.completed),
-    }
-
-    if (activeEditor.mode === 'create') {
-      await onCreateTask(payload)
-    } else if (activeEditor.taskId) {
-      await onUpdateTask(activeEditor.taskId, payload)
-    }
+    })
     setActiveEditor(null)
   }
 
-  const handleDragStart = (taskId) => (event) => {
-    event.dataTransfer.effectAllowed = 'move'
-    event.dataTransfer.setData('text/plain', taskId)
-    setDragState({ draggingId: taskId, overId: null })
-  }
-
-  const handleDragOver = (taskId) => (event) => {
-    event.preventDefault()
-    if (dragState.overId !== taskId) {
-      setDragState((prev) => ({ ...prev, overId: taskId }))
+  // Group by urgency so the shape of the day is visible at a glance.
+  const groups = useMemo(() => {
+    const bucket = { overdue: [], today: [], upcoming: [], someday: [] }
+    for (const task of tasks.filter((t) => !t.completed)) {
+      bucket[dueBucket(task.dueDate)].push(task)
     }
-    event.dataTransfer.dropEffect = 'move'
-  }
-
-  const handleDrop = (taskId) => async (event) => {
-    event.preventDefault()
-    const draggedId = dragState.draggingId ?? event.dataTransfer.getData('text/plain')
-    if (!draggedId || draggedId === taskId) return
-    const fromIndex = tasks.findIndex((task) => task.id === draggedId)
-    const toIndex = tasks.findIndex((task) => task.id === taskId)
-    if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return
-    await onReorderTask(draggedId, toIndex)
-    setDragState({ draggingId: null, overId: null })
-  }
-
-  const handleDragEnd = () => setDragState({ draggingId: null, overId: null })
-
-  const detailMetrics = useMemo(() => {
-    const completed = tasks.filter((task) => task.completed).length
-    return { completed, total: tasks.length }
+    return { ...bucket, done: tasks.filter((t) => t.completed) }
   }, [tasks])
 
+  const total = tasks.length
+  const completed = groups.done.length
+  const pct = total ? Math.round((completed / total) * 100) : 0
+
+  const rowProps = (task) => ({
+    task,
+    editing: activeEditor?.taskId === task.id,
+    draft: activeEditor?.draft,
+    onDraftChange: updateDraft,
+    onStartEdit: () => startEdit(task),
+    onCancelEdit: () => setActiveEditor(null),
+    onSubmitEdit: submitDraft,
+    onToggle: () => onUpdateTask(task.id, { completed: !task.completed }),
+    onDelete: () => onDeleteTask(task.id),
+    onDuplicate: () => onDuplicateTask(task),
+  })
+
   return (
-    <section className="space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <Button variant="ghost" size="sm" className="mb-2 -ml-3" onClick={() => navigate('/todo')}>
-            <ArrowLeft className="mr-1.5 h-4 w-4" /> TODO
-          </Button>
-          <h1 className="truncate text-2xl font-bold tracking-tight">{currentTodo?.title ?? 'TODO'}</h1>
-          {currentTodo?.description && (
-            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{currentTodo.description}</p>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {currentTodo && (
-            <Button variant="outline" size="sm" onClick={() => onEditTodo(currentTodo)}>
-              <Edit3 className="mr-1.5 h-4 w-4" /> Edit
+    <section className="mx-auto max-w-3xl space-y-5">
+      <div>
+        <button
+          type="button"
+          onClick={() => navigate('/todo')}
+          className="mb-3 inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronLeft className="h-4 w-4" /> All lists
+        </button>
+
+        <div className="rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-background to-background p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h1 className="truncate text-2xl font-bold tracking-tight">
+                {currentTodo?.title ?? 'List'}
+              </h1>
+              {currentTodo?.description ? (
+                <p className="mt-1 text-sm text-muted-foreground">{currentTodo.description}</p>
+              ) : null}
+            </div>
+            <Button size="sm" variant="outline" onClick={() => onEditTodo(currentTodo)}>
+              <Edit3 className="mr-1.5 h-4 w-4" /> Edit list
             </Button>
-          )}
-          <Button size="sm" onClick={startCreate}>
-            <Plus className="mr-1.5 h-4 w-4" /> Add Task
-          </Button>
+          </div>
+
+          <div className="mt-4">
+            <div className="mb-1.5 flex items-center justify-between text-xs">
+              <span className="text-muted-foreground">
+                {total === 0
+                  ? 'No tasks yet'
+                  : completed === total
+                    ? 'Everything done \u2014 nice work'
+                    : `${completed} of ${total} complete`}
+              </span>
+              <span className="font-semibold">{pct}%</span>
+            </div>
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full rounded-full transition-[width] duration-500 ${
+                  total > 0 && completed === total ? 'bg-emerald-500' : 'bg-primary'
+                }`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-3 rounded-lg border border-border bg-card p-4 md:grid-cols-[1fr_auto_auto] md:items-center">
-        <ProgressBar completed={detailMetrics.completed} total={detailMetrics.total} />
-        <div className="text-sm text-muted-foreground">Created {formatDate(currentTodo?.createdAt)}</div>
-        <div className="text-sm text-muted-foreground">Updated {formatDate(currentTodo?.updatedAt)}</div>
-      </div>
+      <QuickAddTask onCreate={onCreateTask} />
 
-      {tasksLoading && (
-        <div className="flex justify-center py-16">
+      {tasksLoading && total === 0 && (
+        <div className="flex items-center justify-center py-16">
           <RefreshCw className="h-6 w-6 animate-spin text-primary" />
         </div>
       )}
 
-      {!tasksLoading && tasks.length === 0 && !activeEditor && (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-16 text-center">
-          <ListChecks className="mb-3 h-10 w-10 text-muted-foreground/50" />
-          <h3 className="font-semibold">No tasks yet</h3>
-          <p className="mt-1 text-sm text-muted-foreground">Add checklist items to track this TODO.</p>
-          <Button className="mt-4" onClick={startCreate}>
-            <Plus className="mr-1.5 h-4 w-4" /> Add Task
-          </Button>
+      {!tasksLoading && total === 0 && (
+        <div className="rounded-2xl border border-dashed border-border py-14 text-center">
+          <ListChecks className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
+          <p className="text-sm text-muted-foreground">
+            Add your first task above &mdash; a title is all you need.
+          </p>
         </div>
       )}
 
-      {!tasksLoading && (tasks.length > 0 || activeEditor) && (
-        <div className="rounded-lg border border-border bg-card">
-          <div className="divide-y divide-border">
-            {tasks.map((task) => {
-              const isEditing = activeEditor?.mode === 'edit' && activeEditor?.taskId === task.id
-
-              if (isEditing) {
-                return (
-                  <div key={task.id} className="space-y-3 px-4 py-4">
-                    <div className="grid gap-4 sm:grid-cols-[1fr_220px] sm:items-start">
-                      <div className="space-y-3">
-                        <div className="grid gap-3 sm:grid-cols-[1fr_180px]">
-                          <Input
-                            value={activeEditor.draft.title}
-                            onChange={(event) => updateDraft('title', event.target.value)}
-                            placeholder="Task title"
-                            autoFocus
-                          />
-                          <div className="flex items-center gap-2">
-                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                              <input
-                                type="checkbox"
-                                checked={activeEditor.draft.completed}
-                                onChange={(event) => updateDraft('completed', event.target.checked)}
-                              />
-                              Completed
-                            </label>
-                          </div>
-                        </div>
-                        <textarea
-                          value={activeEditor.draft.description}
-                          onChange={(event) => updateDraft('description', event.target.value)}
-                          placeholder="Notes or description"
-                          className="min-h-20 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                        />
-                      </div>
-                      <div className="space-y-3 sm:pt-0">
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-muted-foreground">Priority</label>
-                          <Select
-                            value={activeEditor.draft.priority}
-                            onChange={(event) => updateDraft('priority', event.target.value)}
-                          >
-                            {priorities.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </Select>
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-muted-foreground">Due date</label>
-                          <Input
-                            type="date"
-                            value={activeEditor.draft.dueDate}
-                            onChange={(event) => updateDraft('dueDate', event.target.value)}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex justify-end gap-2 sm:pr-1">
-                      <Button variant="outline" size="sm" onClick={cancelEdit}>Cancel</Button>
-                      <Button size="sm" onClick={submitDraft}>Save</Button>
-                    </div>
-                  </div>
-                )
-              }
-
-              return (
-                <div
-                  key={task.id}
-                  className={`flex flex-col gap-3 px-4 py-3 transition-colors hover:bg-muted/30 sm:flex-row sm:items-start ${dragState.overId === task.id ? 'bg-muted/40' : ''}`}
-                  draggable
-                  onDragStart={handleDragStart(task.id)}
-                  onDragOver={handleDragOver(task.id)}
-                  onDrop={handleDrop(task.id)}
-                  onDragEnd={handleDragEnd}
-                  onDoubleClick={() => startEdit(task)}
-                >
-                  <button
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onUpdateTask(task.id, { completed: !task.completed })
-                    }}
-                    className="mt-0.5 text-primary"
-                    title={task.completed ? 'Mark pending' : 'Mark completed'}
-                  >
-                    {task.completed ? <Check className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
-                  </button>
-                  <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="min-w-0">
-                      <h3 className={`font-medium ${task.completed ? 'text-muted-foreground line-through' : ''}`}>
-                        {task.title}
-                      </h3>
-                      {task.description && (
-                        <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{task.description}</p>
-                      )}
-                    </div>
-                    <div className="flex w-full flex-col items-start gap-1 text-xs text-muted-foreground sm:w-[220px] sm:items-end">
-                      <span className="rounded-full border border-border px-2 py-0.5">
-                        {priorityLabel(task.priority)}
-                      </span>
-                      <span className="rounded-full border border-border px-2 py-0.5">
-                        {task.dueDate ? `Due ${formatDate(task.dueDate)}` : 'No due date'}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center justify-end gap-1" onClick={(event) => event.stopPropagation()}>
-                    <Button variant="ghost" size="sm" onClick={() => startEdit(task)}>
-                      <Edit3 className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDuplicateTask(task)}>
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => onDeleteTask(task.id)}>
-                      <X className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </div>
-              )
-            })}
-
-            {activeEditor?.mode === 'create' && (
-              <div className="space-y-3 px-4 py-4">
-                <div className="grid gap-4 sm:grid-cols-[1fr_220px] sm:items-start">
-                  <div className="space-y-3">
-                    <div className="grid gap-3 sm:grid-cols-[1fr_180px]">
-                      <Input
-                        value={activeEditor.draft.title}
-                        onChange={(event) => updateDraft('title', event.target.value)}
-                        placeholder="Task title"
-                        autoFocus
-                      />
-                      <div className="flex items-center gap-2">
-                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <input
-                            type="checkbox"
-                            checked={activeEditor.draft.completed}
-                            onChange={(event) => updateDraft('completed', event.target.checked)}
-                          />
-                          Completed
-                        </label>
-                      </div>
-                    </div>
-                    <textarea
-                      value={activeEditor.draft.description}
-                      onChange={(event) => updateDraft('description', event.target.value)}
-                      placeholder="Notes or description"
-                      className="min-h-20 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                    />
-                  </div>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-muted-foreground">Priority</label>
-                      <Select
-                        value={activeEditor.draft.priority}
-                        onChange={(event) => updateDraft('priority', event.target.value)}
-                      >
-                        {priorities.map((option) => (
-                          <option key={option.value} value={option.value}>{option.label}</option>
-                        ))}
-                      </Select>
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-medium text-muted-foreground">Due date</label>
-                      <Input
-                        type="date"
-                        value={activeEditor.draft.dueDate}
-                        onChange={(event) => updateDraft('dueDate', event.target.value)}
-                      />
-                    </div>
-                  </div>
-                </div>
-                <div className="flex justify-end gap-2 sm:pr-1">
-                  <Button variant="outline" size="sm" onClick={cancelEdit}>Cancel</Button>
-                  <Button size="sm" onClick={submitDraft}>Add Task</Button>
-                </div>
+      <div className="space-y-5">
+        {SECTIONS.map(({ key, label, tone }) => {
+          const bucketTasks = groups[key]
+          if (!bucketTasks?.length) return null
+          return (
+            <div key={key}>
+              <h2 className={`mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide ${tone}`}>
+                {label}
+                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {bucketTasks.length}
+                </span>
+              </h2>
+              <div className="overflow-hidden rounded-xl border border-border">
+                {bucketTasks.map((task) => (
+                  <TaskRow key={task.id} {...rowProps(task)} />
+                ))}
               </div>
-            )}
+            </div>
+          )
+        })}
+
+        {groups.done.length > 0 && (
+          <div>
+            <h2 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Completed
+              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium">
+                {groups.done.length}
+              </span>
+            </h2>
+            <div className="overflow-hidden rounded-xl border border-border">
+              {groups.done.map((task) => (
+                <TaskRow key={task.id} {...rowProps(task)} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+const SECTIONS = [
+  { key: 'overdue', label: 'Overdue', tone: 'text-rose-500' },
+  { key: 'today', label: 'Today', tone: 'text-amber-500' },
+  { key: 'upcoming', label: 'Upcoming', tone: 'text-muted-foreground' },
+  { key: 'someday', label: 'No date', tone: 'text-muted-foreground' },
+]
+
+const PRIORITY_STYLES = {
+  1: 'bg-slate-100 text-slate-600',
+  2: 'bg-sky-100 text-sky-700',
+  3: 'bg-emerald-100 text-emerald-700',
+  4: 'bg-amber-100 text-amber-700',
+  5: 'bg-rose-100 text-rose-700',
+}
+
+function dueBucket(dueDate) {
+  if (!dueDate) return 'someday'
+  const date = new Date(dueDate)
+  if (Number.isNaN(date.getTime())) return 'someday'
+  const now = new Date()
+  const a = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const b = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const days = Math.round((b - a) / 86400000)
+  if (days < 0) return 'overdue'
+  if (days === 0) return 'today'
+  return 'upcoming'
+}
+
+/**
+ * One-line capture that expands only when more detail is wanted: typing a
+ * title and pressing Enter is the whole flow for a simple task.
+ */
+function QuickAddTask({ onCreate }) {
+  const [title, setTitle] = useState('')
+  const [expanded, setExpanded] = useState(false)
+  const [priority, setPriority] = useState(4)
+  const [dueDate, setDueDate] = useState('')
+  const [description, setDescription] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const reset = () => {
+    setTitle('')
+    setPriority(4)
+    setDueDate('')
+    setDescription('')
+    setExpanded(false)
+  }
+
+  const submit = async (event) => {
+    event?.preventDefault()
+    if (!title.trim() || saving) return
+    setSaving(true)
+    try {
+      await onCreate({
+        title: title.trim(),
+        description: description.trim(),
+        priority,
+        dueDate: toApiDate(dueDate),
+        completed: false,
+      })
+      reset()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form
+      onSubmit={submit}
+      className={`rounded-xl border bg-background p-2 transition-colors ${
+        expanded ? 'border-primary/50 shadow-sm' : 'border-border'
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <Plus className="ml-1.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <input
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          onFocus={() => setExpanded(true)}
+          placeholder="Add a task and press Enter"
+          aria-label="Task title"
+          className="min-w-0 flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground"
+        />
+        {title.trim() ? (
+          <Button type="submit" size="sm" disabled={saving} className="shrink-0">
+            {saving ? 'Adding...' : 'Add'}
+          </Button>
+        ) : null}
+      </div>
+
+      {expanded && (
+        <div className="mt-2 grid gap-2 border-t border-border pt-2 sm:grid-cols-3">
+          <div className="sm:col-span-2">
+            <span className="mb-1 block text-[11px] font-medium text-muted-foreground">Priority</span>
+            <PriorityRating value={priority} onChange={setPriority} size="sm" />
+          </div>
+
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-medium text-muted-foreground">Due date</span>
+            <Input
+              type="date"
+              className="h-9 text-xs"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+            />
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-[11px] font-medium text-muted-foreground">Note</span>
+            <Input
+              className="h-9 text-xs"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Optional"
+            />
+          </label>
+
+          <div className="flex justify-end sm:col-span-3">
+            <Button type="button" size="sm" variant="ghost" onClick={reset}>
+              Cancel
+            </Button>
           </div>
         </div>
       )}
-    </section>
+    </form>
+  )
+}
+
+function TaskRow({
+  task, editing, draft, onDraftChange, onStartEdit, onCancelEdit, onSubmitEdit,
+  onToggle, onDelete, onDuplicate,
+}) {
+  const bucket = dueBucket(task.dueDate)
+  const priorityLevel = task.priority ?? 0
+
+  if (editing) {
+    return (
+      <div className="border-b border-border/60 bg-muted/30 p-3 last:border-b-0">
+        <div className="grid gap-2 sm:grid-cols-2">
+          <Input
+            className="h-9 text-sm sm:col-span-2"
+            value={draft?.title ?? ''}
+            onChange={(e) => onDraftChange('title', e.target.value)}
+            placeholder="Task title"
+            autoFocus
+          />
+          <div className="flex items-center">
+            <PriorityRating
+              value={draft?.priority ?? 0}
+              onChange={(next) => onDraftChange('priority', next)}
+              size="sm"
+            />
+          </div>
+          <Input
+            type="date"
+            className="h-9 text-xs"
+            value={draft?.dueDate ?? ''}
+            onChange={(e) => onDraftChange('dueDate', e.target.value)}
+          />
+          <Input
+            className="h-9 text-xs sm:col-span-2"
+            value={draft?.description ?? ''}
+            onChange={(e) => onDraftChange('description', e.target.value)}
+            placeholder="Note (optional)"
+          />
+        </div>
+        <div className="mt-2 flex justify-end gap-2">
+          <Button size="sm" variant="ghost" onClick={onCancelEdit}>Cancel</Button>
+          <Button size="sm" onClick={onSubmitEdit}>Save</Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="group flex items-start gap-2.5 border-b border-border/60 px-3 py-2.5 transition-colors last:border-b-0 hover:bg-muted/40">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-label={task.completed ? 'Mark incomplete' : 'Mark complete'}
+        className={`mt-0.5 flex shrink-0 items-center justify-center rounded-full border-2 transition-all ${
+          task.completed
+            ? 'border-emerald-500 bg-emerald-500 text-white'
+            : 'border-muted-foreground/40 hover:border-primary'
+        }`}
+        style={{ height: '1.125rem', width: '1.125rem' }}
+      >
+        {task.completed && <Check className="h-3 w-3" strokeWidth={3} />}
+      </button>
+
+      <div className="min-w-0 flex-1 cursor-pointer" onClick={onStartEdit}>
+        <div className={`text-sm ${task.completed ? 'text-muted-foreground line-through' : ''}`}>
+          {task.title}
+        </div>
+        {task.description ? (
+          <div className="truncate text-xs text-muted-foreground">{task.description}</div>
+        ) : null}
+
+        {(task.dueDate || priorityLevel > 0) && (
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            {priorityLevel > 0 ? (
+              <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${PRIORITY_STYLES[priorityLevel]}`}>
+                {PRIORITY_LABELS[priorityLevel]}
+              </span>
+            ) : null}
+            {task.dueDate ? (
+              <span
+                className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                  task.completed
+                    ? 'bg-muted text-muted-foreground'
+                    : bucket === 'overdue'
+                      ? 'bg-rose-100 text-rose-700'
+                      : bucket === 'today'
+                        ? 'bg-amber-100 text-amber-700'
+                        : 'bg-muted text-muted-foreground'
+                }`}
+              >
+                <CalendarDays className="h-2.5 w-2.5" />
+                {formatDate(task.dueDate)}
+              </span>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+        <button
+          type="button"
+          onClick={onDuplicate}
+          aria-label="Duplicate task"
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <Copy className="h-3.5 w-3.5" />
+        </button>
+        <button
+          type="button"
+          onClick={onDelete}
+          aria-label="Delete task"
+          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-red-500"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
   )
 }

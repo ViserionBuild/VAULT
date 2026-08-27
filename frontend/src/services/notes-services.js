@@ -34,3 +34,8 @@ export function moveNote(api, noteId, parentId) {
     body: { parentId },
   })
 }
+
+export function searchNotes(api, { workspaceId, query }) {
+  const params = new URLSearchParams({ q: query, workspaceId })
+  return api(`/notes/search?${params}`)
+}

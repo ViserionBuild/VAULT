@@ -1,23 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   FolderPlus, Plus, RefreshCw, Pencil, Trash2, Star,
   FolderInput, BookMarked, NotebookPen
 } from 'lucide-react'
-import DOMPurify from 'dompurify'
 import { useApi } from '../hooks/use-api'
 import { useWorkspace } from '../contexts/workspace-context'
 import { Button } from '../components/ui/button'
 import { Breadcrumbs } from '../components/resources/breadcrumbs'
 import { ContextMenu, useContextMenu } from '../components/ui/context-menu'
-import { Select } from '../components/ui/select'
 import { MoveDialog } from '../components/resources/move-dialog'
+import { ViewToggle } from '../components/resources/view-toggle'
+import { ResourceSearch } from '../components/resources/resource-search'
+import { NoteCard, NoteListHeader, NoteListItem, NoteTable } from '../components/notes/note-views'
+import { NoteEditorDialog } from '../components/notes/note-editor-dialog'
 import {
   createNote,
   deleteNote,
   favoriteNote,
-  fetchNote,
   fetchNotes,
   moveNote,
+  searchNotes,
   updateNote,
 } from '../services/notes-services'
 
@@ -31,15 +33,16 @@ export function NotesPage() {
   const [sortBy, setSortBy] = useState('position')
   const [sortOrder, setSortOrder] = useState('asc')
   const [loading, setLoading] = useState(false)
+  const [view, setView] = useState(() => localStorage.getItem('vault-notes-view') ?? 'grid')
+  const [selectedIds, setSelectedIds] = useState([])
 
   // Dialogs
   const [showCreateFolder, setShowCreateFolder] = useState(false)
   const [folderTitle, setFolderTitle] = useState('')
-  const [showCreateNote, setShowCreateNote] = useState(false)
-  const [noteTitle, setNoteTitle] = useState('')
-  const [noteContent, setNoteContent] = useState('')
+  // One piece of state drives the note editor: the note being edited, or a
+  // stub with isNew for a brand-new note.
+  const [editorTarget, setEditorTarget] = useState(null)
   const [editItem, setEditItem] = useState(null)
-  const iframeRef = useRef(null)
   const [showMoveDialog, setShowMoveDialog] = useState(false)
   const [moveItem, setMoveItem] = useState(null)
 
@@ -78,86 +81,43 @@ export function NotesPage() {
     fetchItems()
   }, [api, fetchItems])
 
-  useEffect(() => {
-    const handleMessage = (e) => {
-      const msg = e.data || {}
-      if (msg.type === 'editor-ready') {
-        const iframe = iframeRef.current
-        if (iframe && iframe.contentWindow) {
-          const payload = {
-            type: 'init',
-            title: showCreateNote ? noteTitle : (editItem?.title || ''),
-            content: showCreateNote ? noteContent : (editItem?.content || ''),
-          }
-          iframe.contentWindow.postMessage(payload, '*')
-        }
+  // Note editing is in-React now; the iframe/postMessage bridge is gone.
+  // Autosave writes through these, so there is no explicit save step.
+  const openNewNote = () => setEditorTarget({ isNew: true, title: '', content: '' })
+
+  const handleSaveNote = useCallback(
+    async ({ title, content }) => {
+      if (editorTarget?.isNew) {
+        const created = await createNote(api, {
+          title,
+          content,
+          type: 'note',
+          workspaceId: activeWorkspace.id,
+          parentId: currentFolder,
+        })
+        // Adopt the new id so subsequent autosaves update rather than insert.
+        setEditorTarget({ ...created, isNew: false })
+        fetchItems()
+        return created
       }
 
-      if (msg.type === 'save') {
-        const content = msg.content ?? ''
-        if (showCreateNote) {
-          (async () => {
-            if (!noteTitle.trim()) return
-            await createNote(api, {
-              title: noteTitle,
-              type: 'note',
-              content,
-              workspaceId: activeWorkspace.id,
-              parentId: currentFolder,
-              description: '',
-            })
-            setNoteTitle('')
-            setNoteContent('')
-            setShowCreateNote(false)
-            fetchItems()
-          })()
-        } else if (editItem) {
-          (async () => {
-            await handleEditItem(editItem.id, { title: editItem.title, content })
-          })()
-        }
-      }
+      const updated = await updateNote(api, editorTarget.id, { title, content })
+      fetchItems()
+      return updated
+    },
+    [api, activeWorkspace, currentFolder, editorTarget, fetchItems],
+  )
 
-      if (msg.type === 'cancel') {
-        if (showCreateNote) setShowCreateNote(false)
-        if (editItem) setEditItem(null)
-      }
-    }
-
-    window.addEventListener('message', handleMessage)
-    return () => window.removeEventListener('message', handleMessage)
-  }, [showCreateNote, editItem, noteTitle, noteContent, api, activeWorkspace, currentFolder, fetchItems, handleEditItem])
-
-  // Ensure iframe editor receives init payload when dialogs open (covers already-ready iframe)
-  useEffect(() => {
-    const iframe = iframeRef.current
-    if (iframe && iframe.contentWindow) {
-      iframe.contentWindow.postMessage({
-        type: 'init',
-        title: showCreateNote ? noteTitle : (editItem?.title || ''),
-        content: showCreateNote ? noteContent : (editItem?.content || ''),
-      }, '*')
-    }
-  }, [showCreateNote, editItem, noteTitle, noteContent])
 
   // ─── Actions ───────────────────────────────────────────────────
   const handleOpen = (item) => {
     if (item.type === 'folder') {
       setCurrentFolder(item.id)
+      setSelectedIds([])
       return
     }
-
-    // open note viewer for notes
-    if (item.type === 'note') {
-      void (async () => {
-        try {
-          const data = await fetchNote(api, item.id)
-          setViewItem(data?.item || item)
-        } catch {
-          setViewItem(item)
-        }
-      })()
-    }
+    // Notes open in the editor, which starts in reading mode.
+    setEditorTarget(item)
   }
 
   const handleNavigate = (folderId) => {
@@ -178,24 +138,8 @@ export function NotesPage() {
     fetchItems()
   }
 
-  // helper to strip HTML for list preview
-  const stripHtml = (html) => {
-    if (!html) return ''
-    try {
-      const div = document.createElement('div')
-      div.innerHTML = html
-      return div.textContent || div.innerText || ''
-    } catch {
-      return html
-    }
-  }
 
-  const sanitizeNoteHtml = (html) => DOMPurify.sanitize(html || '', {
-    ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'u', 'a', 'p', 'br', 'ul', 'ol', 'li', 'blockquote', 'code', 'pre', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'],
-    ALLOWED_ATTR: ['href', 'rel', 'target', 'class'],
-  })
 
-  const [viewItem, setViewItem] = useState(null)
 
 
   const handleDelete = async (itemId) => {
@@ -214,6 +158,54 @@ export function NotesPage() {
     setMoveItem(null)
     setShowMoveDialog(false)
     fetchItems()
+  }
+
+  // Persist the chosen view, matching the Resources tab.
+  useEffect(() => {
+    localStorage.setItem('vault-notes-view', view)
+  }, [view])
+
+  const handleSelect = (itemId) => {
+    setSelectedIds((prev) =>
+      prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId],
+    )
+  }
+
+  const allSelected = items.length > 0 && selectedIds.length === items.length
+  const someSelected = selectedIds.length > 0 && !allSelected
+  const handleToggleAll = () => {
+    setSelectedIds(allSelected ? [] : items.map((item) => item.id))
+  }
+
+  const gridFolders = items.filter((item) => item.type === 'folder')
+  const gridNotes = items.filter((item) => item.type !== 'folder')
+
+  const handleToggleGroup = (groupItems) => {
+    const groupIds = groupItems.map((item) => item.id)
+    const allChosen = groupIds.every((id) => selectedIds.includes(id))
+    setSelectedIds((prev) =>
+      allChosen
+        ? prev.filter((id) => !groupIds.includes(id))
+        : [...new Set([...prev, ...groupIds])],
+    )
+  }
+
+  // Workspace-wide note search.
+  const handleSearch = useCallback(
+    async (query) => {
+      if (!activeWorkspace) return []
+      const data = await searchNotes(api, { workspaceId: activeWorkspace.id, query })
+      return data.items ?? []
+    },
+    [api, activeWorkspace],
+  )
+
+  const handleOpenSearchResult = (item) => {
+    if (item.type === 'folder') {
+      setCurrentFolder(item.id)
+      return
+    }
+    handleOpen(item)
   }
 
   const handleSort = (field) => {
@@ -235,7 +227,7 @@ export function NotesPage() {
     {
       label: 'Edit',
       icon: Pencil,
-      onClick: () => setEditItem(item),
+      onClick: () => setEditorTarget(item),
     },
     {
       label: item.isFavorite ? 'Remove Favorite' : 'Add Favorite',
@@ -260,32 +252,51 @@ export function NotesPage() {
   ]
 
   // ─── Render ────────────────────────────────────────────────────
+  // The editor takes over the content column; the sidebar stays visible
+  // because this renders inside the shell's <main>, not as a fixed overlay.
+  if (editorTarget) {
+    return (
+      <NoteEditorDialog
+        note={editorTarget}
+        mode={editorTarget.isNew ? 'edit' : 'read'}
+        onClose={() => setEditorTarget(null)}
+        onSave={handleSaveNote}
+      />
+    )
+  }
+
   return (
     <section className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Notes</h1>
-          <Breadcrumbs breadcrumbs={breadcrumbs} onNavigate={handleNavigate} />
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight">Notes</h1>
+            <Breadcrumbs breadcrumbs={breadcrumbs} onNavigate={handleNavigate} />
+          </div>
+
+          {/* The sort dropdown is gone: list and table headers sort by column,
+              matching the Resources tab. */}
+          <div className="flex flex-wrap items-center gap-2">
+            <ViewToggle activeView={view} onViewChange={setView} />
+            <Button size="sm" variant="outline" onClick={() => setShowCreateFolder(true)}>
+              <FolderPlus className="mr-1.5 h-4 w-4" />
+              <span className="hidden xs:inline">Folder</span>
+              <span className="xs:hidden">New</span>
+            </Button>
+            <Button size="sm" onClick={openNewNote}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              <span className="hidden xs:inline">Note</span>
+              <span className="xs:hidden">Add</span>
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Select
-            className="w-36 h-9 text-xs"
-            value={sortBy}
-            onChange={(e) => handleSort(e.target.value)}
-          >
-            <option value="position">Manual</option>
-            <option value="title">Name</option>
-            <option value="createdAt">Created</option>
-            <option value="updatedAt">Modified</option>
-          </Select>
-          <Button size="sm" variant="outline" onClick={() => setShowCreateFolder(true)}>
-            <FolderPlus className="mr-1.5 h-4 w-4" /> Folder
-          </Button>
-          <Button size="sm" onClick={() => setShowCreateNote(true)}>
-            <Plus className="mr-1.5 h-4 w-4" /> Note
-          </Button>
-        </div>
+
+        <ResourceSearch
+          onSearch={handleSearch}
+          onOpenResult={handleOpenSearchResult}
+          placeholder="Search in Notes"
+        />
       </div>
 
       {/* Loading */}
@@ -313,160 +324,140 @@ export function NotesPage() {
             <Button variant="outline" onClick={() => setShowCreateFolder(true)}>
               <FolderPlus className="mr-1.5 h-4 w-4" /> New Folder
             </Button>
-            <Button onClick={() => setShowCreateNote(true)}>
+            <Button onClick={openNewNote}>
               <Plus className="mr-1.5 h-4 w-4" /> New Note
             </Button>
           </div>
         </div>
       )}
 
-      {/* Items List */}
-      {!loading && items.length > 0 && (
-        <div className="grid grid-cols-1 gap-3">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              className="flex items-center gap-3 p-4 rounded-lg border border-input bg-card hover:bg-muted/50"
-              onContextMenu={(e) => handleContextMenu(e, item)}
-            >
-              <div
-                className="flex-1 cursor-pointer min-w-0"
-                onClick={() => item.type === 'folder' && handleOpen(item)}
-              >
-                <div className="flex items-center gap-2">
-                  {item.type === 'folder' ? (
-                    <FolderPlus className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
-                  ) : (
-                    <NotebookPen className="h-5 w-5 flex-shrink-0 text-muted-foreground" />
-                  )}
-                  <h3 className="font-medium truncate">{item.title}</h3>
-                </div>
-                {item.type === 'note' && item.content && (
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{stripHtml(item.content)}</p>
-                )}
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => handleFavorite(item.id)}
-                  title={item.isFavorite ? 'Remove favorite' : 'Add favorite'}
-                >
-                  <Star
-                    className="h-4 w-4"
-                    fill={item.isFavorite ? 'currentColor' : 'none'}
+      {/* Grid View */}
+      {!loading && view === 'grid' && items.length > 0 && (
+        <div className="space-y-6">
+          {gridFolders.length > 0 && (
+            <div>
+              <NoteSectionHeader
+                label="Folders"
+                items={gridFolders}
+                selectedIds={selectedIds}
+                onToggleGroup={handleToggleGroup}
+                addLabel="New folder"
+                onAdd={() => setShowCreateFolder(true)}
+              />
+              <div className="grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]">
+                {gridFolders.map((item) => (
+                  <NoteCard
+                    key={item.id}
+                    item={item}
+                    onOpen={handleOpen}
+                    onContextMenu={handleContextMenu}
+                    onFavorite={handleFavorite}
+                    isSelected={selectedIds.includes(item.id)}
+                    onSelect={handleSelect}
                   />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setMoveItem(item)
-                    setShowMoveDialog(true)
-                  }}
-                  title="Move"
-                >
-                  <FolderInput className="h-4 w-4" />
-                </Button>
-                {editItem?.id === item.id ? (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        handleEditItem(item.id, {
-                          title: editItem.title,
-                          content: editItem.content,
-                        })
-                      }}
-                    >
-                      Save
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setEditItem(null)}
-                    >
-                      Cancel
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setEditItem(item)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleDelete(item.id)}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </>
-                )}
+                ))}
               </div>
             </div>
+          )}
+
+          {gridNotes.length > 0 && (
+            <div>
+              <NoteSectionHeader
+                label="Notes"
+                items={gridNotes}
+                selectedIds={selectedIds}
+                onToggleGroup={handleToggleGroup}
+                addLabel="New note"
+                onAdd={openNewNote}
+              />
+              <div className="grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]">
+                {gridNotes.map((item) => (
+                  <NoteCard
+                    key={item.id}
+                    item={item}
+                    onOpen={handleOpen}
+                    onContextMenu={handleContextMenu}
+                    onFavorite={handleFavorite}
+                    isSelected={selectedIds.includes(item.id)}
+                    onSelect={handleSelect}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* List View */}
+      {!loading && view === 'list' && items.length > 0 && (
+        <div className="rounded-lg border border-border">
+          <NoteListHeader
+            onSort={handleSort}
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+            allSelected={allSelected}
+            someSelected={someSelected}
+            onToggleAll={handleToggleAll}
+          />
+          {items.map((item) => (
+            <NoteListItem
+              key={item.id}
+              item={item}
+              onOpen={handleOpen}
+              onContextMenu={handleContextMenu}
+              onFavorite={handleFavorite}
+              isSelected={selectedIds.includes(item.id)}
+              onSelect={handleSelect}
+            />
           ))}
         </div>
       )}
 
-      {/* Edit Item Dialog - Simple inline edit */}
-      {editItem && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background rounded-lg border border-input p-6 max-w-md w-full mx-4">
-            <h2 className="text-lg font-semibold mb-4">Edit {editItem.type}</h2>
-            <div className="space-y-3">
-              <div>
-                <label className="text-sm font-medium">Title</label>
-                <input
-                  type="text"
-                  value={editItem.title}
-                  onChange={(e) => setEditItem({ ...editItem, title: e.target.value })}
-                  className="w-full mt-1 px-3 py-2 rounded border border-input bg-background text-sm"
-                />
-              </div>
-              {editItem.type === 'note' && (
-                <div>
-                  <label className="text-sm font-medium">Content</label>
-                  <div className="w-full mt-1">
-                    <iframe
-                      ref={iframeRef}
-                      title="Edit note editor"
-                      src="/note-editor.html"
-                      className="w-full h-56 border rounded"
-                    />
-                  </div>
-                </div>
-              )}
-              <div className="flex gap-2 justify-end pt-4">
-                <Button variant="outline" onClick={() => setEditItem(null)}>Cancel</Button>
-                <Button onClick={() => iframeRef.current?.contentWindow?.postMessage({ type: 'request-save' }, '*')}>Save</Button>
-              </div>
+      {/* Table (detail) View */}
+      {!loading && view === 'table' && items.length > 0 && (
+        <div className="rounded-lg border border-border">
+          <NoteTable
+            items={items}
+            onOpen={handleOpen}
+            onContextMenu={handleContextMenu}
+            onFavorite={handleFavorite}
+            selectedIds={selectedIds}
+            onSelect={setSelectedIds}
+            onSort={handleSort}
+            sortBy={sortBy}
+            sortOrder={sortOrder}
+          />
+        </div>
+      )}
+
+      {/* Folder rename only - notes are edited in NoteEditorDialog */}
+      {editItem && editItem.type === 'folder' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-lg border border-border bg-background p-5">
+            <h2 className="mb-4 text-lg font-semibold">Rename folder</h2>
+            <input
+              type="text"
+              value={editItem.title}
+              onChange={(e) => setEditItem({ ...editItem, title: e.target.value })}
+              className="w-full rounded border border-border bg-background px-3 py-2 text-sm"
+              autoFocus
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditItem(null)}>Cancel</Button>
+              <Button
+                onClick={async () => {
+                  await handleEditItem(editItem.id, { title: editItem.title })
+                  setEditItem(null)
+                }}
+              >
+                Save
+              </Button>
             </div>
           </div>
         </div>
       )}
 
       {/* View Note Dialog */}
-      {viewItem && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background rounded-lg border border-input p-6 max-w-2xl w-full mx-4 overflow-auto">
-            <div className="flex items-start justify-between">
-              <h2 className="text-lg font-semibold mb-2">{viewItem.title}</h2>
-              <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setViewItem(null)}>Close</Button>
-              </div>
-            </div>
-            <div className="prose max-w-none mt-4" dangerouslySetInnerHTML={{ __html: sanitizeNoteHtml(viewItem.content) }} />
-          </div>
-        </div>
-      )}
 
       {/* Create Folder Dialog */}
       {showCreateFolder && (
@@ -490,36 +481,6 @@ export function NotesPage() {
         </div>
       )}
 
-      {/* Create Note Dialog */}
-      {showCreateNote && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background rounded-lg border border-input p-6 max-w-md w-full mx-4">
-            <h2 className="text-lg font-semibold mb-4">Create Note</h2>
-            <div className="space-y-3">
-              <input
-                type="text"
-                placeholder="Note title..."
-                value={noteTitle}
-                onChange={(e) => setNoteTitle(e.target.value)}
-                autoFocus
-                className="w-full px-3 py-2 rounded border border-input bg-background text-sm"
-              />
-              <div className="w-full">
-                <iframe
-                  ref={iframeRef}
-                  title="Note editor"
-                  src="/note-editor.html"
-                  className="w-full h-56 border rounded"
-                />
-              </div>
-              <div className="flex gap-2 justify-end">
-                <Button variant="outline" onClick={() => setShowCreateNote(false)}>Cancel</Button>
-                <Button onClick={() => iframeRef.current?.contentWindow?.postMessage({ type: 'request-save' }, '*')}>Create</Button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Context Menu */}
       {contextMenu && (
@@ -551,5 +512,50 @@ export function NotesPage() {
         />
       )}
     </section>
+  )
+}
+
+/**
+ * Grid section heading: hover-revealed select-all for the group, a count, and
+ * an add button for the matching type. Mirrors the Resources tab.
+ */
+function NoteSectionHeader({ label, items, selectedIds, onToggleGroup, addLabel, onAdd }) {
+  const selectedCount = items.filter((item) => selectedIds.includes(item.id)).length
+  const allSelected = items.length > 0 && selectedCount === items.length
+  const someSelected = selectedCount > 0 && !allSelected
+
+  return (
+    <div className="group/section mb-2 flex items-center gap-2">
+      <input
+        type="checkbox"
+        checked={allSelected}
+        ref={(el) => {
+          if (el) el.indeterminate = someSelected
+        }}
+        onChange={() => onToggleGroup(items)}
+        aria-label={`Select all ${label.toLowerCase()}`}
+        className={`h-3.5 w-3.5 cursor-pointer rounded border-border accent-primary transition-opacity focus-visible:opacity-100 group-hover/section:pointer-events-auto group-hover/section:opacity-100 ${
+          selectedCount > 0 ? 'opacity-100' : 'pointer-events-none opacity-0'
+        }`}
+      />
+
+      <h2 className="text-xs font-medium text-muted-foreground">
+        {label}
+        <span className="ml-1.5 text-muted-foreground/60">
+          {selectedCount > 0 ? `${selectedCount} of ${items.length}` : items.length}
+        </span>
+      </h2>
+
+      <button
+        type="button"
+        onClick={onAdd}
+        title={addLabel}
+        aria-label={addLabel}
+        className="ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">{addLabel}</span>
+      </button>
+    </div>
   )
 }

@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  ArrowDown, ArrowUp, CheckCheck, ClipboardList, Edit3, MoreVertical,
+  CheckCheck, ClipboardList, Edit3, MoreVertical,
   Plus, RefreshCw, Search, Trash2, Copy
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
@@ -13,58 +13,18 @@ const todoTabs = [
   { id: 'all', label: 'All' },
 ]
 
-const listSortOptions = [
-  { value: 'title', label: 'Name' },
-  { value: 'completion', label: 'Completion %' },
-  { value: 'priority', label: 'Priority' },
-  { value: 'targetDate', label: 'Target date' },
-  { value: 'updatedAt', label: 'Date modified' },
-  { value: 'createdAt', label: 'Date created' },
-  { value: 'taskCount', label: 'Task count' },
-]
 
 const priorityOptions = [
   { value: 0, label: 'None', className: 'border-border bg-muted text-muted-foreground' },
-  { value: 1, label: 'Low', className: 'border-emerald-200 bg-emerald-100 text-emerald-700' },
-  { value: 2, label: 'Medium', className: 'border-amber-200 bg-amber-100 text-amber-700' },
-  { value: 3, label: 'High', className: 'border-rose-200 bg-rose-100 text-rose-700' },
+  { value: 1, label: 'Whenever', className: 'border-slate-200 bg-slate-100 text-slate-600' },
+  { value: 2, label: 'Low', className: 'border-sky-200 bg-sky-100 text-sky-700' },
+  { value: 3, label: 'Normal', className: 'border-emerald-200 bg-emerald-100 text-emerald-700' },
+  { value: 4, label: 'Important', className: 'border-amber-200 bg-amber-100 text-amber-700' },
+  { value: 5, label: 'Urgent', className: 'border-rose-200 bg-rose-100 text-rose-700' },
 ]
 
-function formatDate(value) {
-  if (!value) return 'Not set'
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', year: 'numeric' }).format(
-    new Date(value),
-  )
-}
 
-function startOfDay(date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
-}
 
-function getTargetDateStyle(value, isCompleted) {
-  if (!value) return { label: '—', className: 'text-muted-foreground' }
-
-  const dateValue = new Date(value)
-  if (Number.isNaN(dateValue.getTime())) {
-    return { label: '—', className: 'text-muted-foreground' }
-  }
-
-  const today = startOfDay(new Date())
-  const targetDay = startOfDay(dateValue)
-
-  if (targetDay.getTime() === today.getTime()) {
-    return { label: formatDate(value), className: 'text-emerald-700' }
-  }
-
-  if (targetDay < today) {
-    return {
-      label: formatDate(value),
-      className: isCompleted ? 'text-muted-foreground' : 'text-rose-600',
-    }
-  }
-
-  return { label: formatDate(value), className: 'text-muted-foreground' }
-}
 
 export function TodoListPage({
   todos,
@@ -72,7 +32,6 @@ export function TodoListPage({
   search,
   onSearchChange,
   sortSpec,
-  onSortChange,
   activeTab,
   onTabChange,
   selectedIds,
@@ -138,299 +97,353 @@ export function TodoListPage({
     return sorted
   }, [todos, activeTab, normalizedSearch, sortSpec])
 
-  const applySort = (key, event) => {
-    onSortChange(key, { additive: Boolean(event?.shiftKey) })
-  }
 
-  const sortLabel = sortSpec
-    .map((entry) => {
-      const label = listSortOptions.find((option) => option.value === entry.key)?.label ?? entry.key
-      return `${label} (${entry.order})`
-    })
-    .join(', ') || 'Date modified (desc)'
 
-  const getSortIndicator = (key) => {
-    const index = sortSpec.findIndex((entry) => entry.key === key)
-    if (index === -1) return null
-    const entry = sortSpec[index]
-    return (
-      <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-        {entry.order === 'asc' ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
-        <span>{index + 1}</span>
-      </span>
-    )
-  }
+  const totals = visibleTodos.reduce(
+    (acc, todo) => {
+      acc.tasks += todo.taskCount ?? 0
+      acc.done += todo.completedTaskCount ?? 0
+      if (dueStateOf(todo.targetDate) === 'overdue') acc.overdue += 1
+      return acc
+    },
+    { tasks: 0, done: 0, overdue: 0 },
+  )
+  const overallPct = totals.tasks ? Math.round((totals.done / totals.tasks) * 100) : 0
 
   return (
-    <section className="space-y-4">
-      <div className="sticky top-14 z-10 -mx-4 border-b border-border bg-background/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
-          <div className="min-w-0 lg:w-44">
-            <h1 className="text-2xl font-bold tracking-tight">TODO</h1>
+    <section className="space-y-5">
+      {/* ── Hero: greeting + at-a-glance progress ───────────────── */}
+      <div className="rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-background to-background p-5">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight">{greeting()}</h1>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {totals.tasks === 0
+                ? 'Nothing on your plate yet — create a list to get started.'
+                : totals.done === totals.tasks
+                  ? `All ${totals.tasks} tasks done. Enjoy the clear deck.`
+                  : `${totals.tasks - totals.done} task${totals.tasks - totals.done === 1 ? '' : 's'} left across ${visibleTodos.length} list${visibleTodos.length === 1 ? '' : 's'}.`}
+            </p>
           </div>
 
-          <div className="relative flex-1">
-            <Search className="pointer-events-none absolute left-4 top-3.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={search}
-              onChange={(event) => onSearchChange(event.target.value)}
-              placeholder="Search TODOs"
-              className="h-11 rounded-full bg-muted/60 pl-11"
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={selectedIds.length === 0}
-              onClick={() => onCompleteTodos(selectedIds)}
-            >
-              <CheckCheck className="mr-1.5 h-4 w-4" /> Complete
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={selectedIds.length === 0}
-              onClick={() => onDeleteTodos(selectedIds)}
-            >
-              <Trash2 className="mr-1.5 h-4 w-4" /> Delete
-            </Button>
-            <Button size="sm" onClick={() => onCreateTodo()}>
-              <Plus className="mr-1.5 h-4 w-4" /> New TODO
-            </Button>
+          <div className="flex items-center gap-4">
+            <StatChip label="Lists" value={visibleTodos.length} />
+            <StatChip label="Done" value={`${totals.done}/${totals.tasks}`} />
+            {totals.overdue > 0 && (
+              <StatChip label="Overdue" value={totals.overdue} tone="danger" />
+            )}
+            <ProgressRing percent={overallPct} />
           </div>
         </div>
+      </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-b border-border/70 pb-2">
-          <div className="flex items-center gap-2">
+      {/* ── Controls ────────────────────────────────────────────── */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+            placeholder="Search lists and tasks"
+            className="h-11 rounded-full pl-10"
+          />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-0.5 rounded-full border border-border bg-muted/40 p-0.5">
             {todoTabs.map((tab) => (
               <button
                 key={tab.id}
+                type="button"
                 onClick={() => onTabChange(tab.id)}
-                className={`rounded-md px-3 py-1.5 text-sm transition-colors ${
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
                   activeTab === tab.id
-                    ? 'bg-primary/10 text-primary'
-                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    ? 'bg-background text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
                 }`}
               >
                 {tab.label}
               </button>
             ))}
           </div>
-          <div className="text-xs text-muted-foreground">
-            Sorted by <span className="font-medium text-foreground">{sortLabel}</span>
-          </div>
+
+          <Button onClick={onCreateTodo} className="h-11 gap-1.5 rounded-full px-4">
+            <Plus className="h-4 w-4" />
+            <span className="hidden xs:inline">New list</span>
+          </Button>
         </div>
       </div>
 
-      {loading && (
-        <div className="flex justify-center py-16">
+      {/* ── Bulk bar ────────────────────────────────────────────── */}
+      {selectedIds.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-2.5">
+          <span className="text-sm font-medium">
+            {selectedIds.length} selected
+          </span>
+          <div className="ml-auto flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={() => onCompleteTodos(selectedIds)}>
+              <CheckCheck className="mr-1.5 h-4 w-4" /> Complete
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => onDeleteTodos(selectedIds)}>
+              <Trash2 className="mr-1.5 h-4 w-4" /> Delete
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => onSelectedIdsChange([])}>
+              Clear
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Loading / empty ─────────────────────────────────────── */}
+      {loading && visibleTodos.length === 0 && (
+        <div className="flex items-center justify-center py-20">
           <RefreshCw className="h-6 w-6 animate-spin text-primary" />
         </div>
       )}
 
       {!loading && visibleTodos.length === 0 && (
-        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border py-16 text-center">
-          <ClipboardList className="mb-3 h-10 w-10 text-muted-foreground/50" />
-          <h3 className="font-semibold">No TODOs found</h3>
-          <p className="mt-1 text-sm text-muted-foreground">Create a TODO or switch filters.</p>
-          <Button className="mt-4" onClick={() => onCreateTodo()}>
-            <Plus className="mr-1.5 h-4 w-4" /> New TODO
-          </Button>
+        <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border py-16 text-center">
+          <div className="mb-4 rounded-2xl bg-primary/10 p-5">
+            <ClipboardList className="h-10 w-10 text-primary/70" />
+          </div>
+          <h3 className="text-lg font-semibold">
+            {search ? 'No lists match your search' : 'Your first list is a click away'}
+          </h3>
+          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+            {search
+              ? 'Try a different term, or clear the search to see everything.'
+              : 'Group related tasks into a list — groceries, a project, this week’s errands.'}
+          </p>
+          {!search && (
+            <Button className="mt-5 gap-1.5 rounded-full" onClick={onCreateTodo}>
+              <Plus className="h-4 w-4" /> Create a list
+            </Button>
+          )}
         </div>
       )}
 
-      {!loading && visibleTodos.length > 0 && (
-        <div className="overflow-visible rounded-lg border border-border bg-card">
-          <div className="hidden grid-cols-[2.75rem_minmax(16rem,1.4fr)_minmax(12rem,1fr)_7.5rem_9.5rem_9rem_9rem_9rem_3rem] items-center gap-3 border-b border-border bg-muted/40 px-3 py-2 text-xs font-medium text-muted-foreground md:grid">
-            <input
-              type="checkbox"
-              checked={visibleTodos.length > 0 && visibleTodos.every((todo) => selectedIds.includes(todo.id))}
-              onChange={(event) => {
-                onSelectedIdsChange(event.target.checked ? visibleTodos.map((todo) => todo.id) : [])
-              }}
-              className="h-4 w-4 rounded border-border"
+      {/* ── List cards ──────────────────────────────────────────── */}
+      {visibleTodos.length > 0 && (
+        <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+          {visibleTodos.map((todo) => (
+            <TodoListCard
+              key={todo.id}
+              todo={todo}
+              isSelected={selectedIds.includes(todo.id)}
+              menuOpen={openMenuId === todo.id}
+              onToggleMenu={() => onOpenMenuChange(openMenuId === todo.id ? null : todo.id)}
+              onOpen={() => navigate(`/todo/${todo.id}`)}
+              onToggleSelect={() =>
+                onSelectedIdsChange(
+                  selectedIds.includes(todo.id)
+                    ? selectedIds.filter((id) => id !== todo.id)
+                    : [...selectedIds, todo.id],
+                )
+              }
+              onEdit={() => onEditTodo(todo)}
+              onDuplicate={() => onDuplicateTodo(todo)}
+              onComplete={() => onCompleteTodos([todo.id])}
+              onDelete={() => onDeleteTodos([todo.id])}
             />
-            <button
-              className="flex items-center gap-1 pl-6 text-left text-foreground"
-              onClick={(event) => applySort('title', event)}
-            >
-              Name
-              {getSortIndicator('title')}
-            </button>
-            <div className="text-left whitespace-nowrap">Description</div>
-            <button
-              className="flex items-center gap-1 text-left whitespace-nowrap"
-              onClick={(event) => applySort('priority', event)}
-            >
-              Priority
-              {getSortIndicator('priority')}
-            </button>
-            <button
-              className="flex items-center gap-1 text-left whitespace-nowrap"
-              onClick={(event) => applySort('targetDate', event)}
-            >
-              Target date
-              {getSortIndicator('targetDate')}
-            </button>
-            <button
-              className="flex items-center gap-1 text-left whitespace-nowrap"
-              onClick={(event) => applySort('completion', event)}
-            >
-              Completion %
-              {getSortIndicator('completion')}
-            </button>
-            <button
-              className="flex items-center gap-1 text-left whitespace-nowrap"
-              onClick={(event) => applySort('updatedAt', event)}
-            >
-              Date modified
-              {getSortIndicator('updatedAt')}
-            </button>
-            <button
-              className="flex items-center gap-1 text-left whitespace-nowrap"
-              onClick={(event) => applySort('createdAt', event)}
-            >
-              Date created
-              {getSortIndicator('createdAt')}
-            </button>
-            <div className="text-right"></div>
-          </div>
-
-          <div className="divide-y divide-border">
-            {visibleTodos.map((todo) => (
-              <div
-                key={todo.id}
-                className="group grid cursor-pointer grid-cols-[2rem_minmax(0,1fr)_2.5rem] gap-3 px-3 py-2.5 transition-colors hover:bg-muted/50 md:grid-cols-[2.75rem_minmax(16rem,1.4fr)_minmax(12rem,1fr)_7.5rem_9.5rem_9rem_9rem_9rem_3rem] md:items-center"
-                onClick={() => navigate(`/todo/${todo.id}`)}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedIds.includes(todo.id)}
-                  onChange={(event) => {
-                    event.stopPropagation()
-                    onSelectedIdsChange((prev) =>
-                      prev.includes(todo.id) ? prev.filter((id) => id !== todo.id) : [...prev, todo.id],
-                    )
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                  className="h-4 w-4 rounded border-border"
-                />
-
-                <div className="min-w-0 pl-1">
-                  <div className="flex items-center gap-2">
-                    <ClipboardList className="h-4 w-4 shrink-0 text-primary" />
-                    <h2 className="truncate text-sm font-medium">{todo.title}</h2>
-                  </div>
-                  <div className="mt-3 md:hidden">
-                    <p className="line-clamp-1 text-xs text-muted-foreground">{todo.description || '—'}</p>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                      <span>{todo.completed ? 'Completed' : 'Pending'}</span>
-                      <span>
-                        {todo.taskCount > 0
-                          ? `${Math.round((todo.completedTaskCount / todo.taskCount) * 100)}% complete`
-                          : '0% complete'}
-                      </span>
-                      <span>Modified {formatDate(todo.updatedAt)}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="hidden min-w-0 text-sm text-muted-foreground md:block">
-                  <span className="truncate whitespace-nowrap">{todo.description || '—'}</span>
-                </div>
-                <div className="hidden md:block">
-                  {(() => {
-                    const priority = priorityOptions.find((option) => option.value === Number(todo.priority))
-                      ?? priorityOptions[0]
-                    return (
-                      <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${priority.className}`}>
-                        {priority.label}
-                      </span>
-                    )
-                  })()}
-                </div>
-                <div className="hidden text-sm md:block">
-                  {(() => {
-                    const target = getTargetDateStyle(todo.targetDate, todo.completed)
-                    return (
-                      <span className={`whitespace-nowrap ${target.className}`}>{target.label}</span>
-                    )
-                  })()}
-                </div>
-                <div className="hidden md:block">
-                  {(() => {
-                    const total = todo.taskCount ?? 0
-                    const completed = todo.completedTaskCount ?? 0
-                    const percent = total > 0 ? Math.round((completed / total) * 100) : 0
-                    const colorClass = percent === 100
-                      ? 'border-emerald-200 bg-emerald-100 text-emerald-700'
-                      : percent < 50
-                        ? 'border-rose-200 bg-rose-100 text-rose-700'
-                        : 'border-amber-200 bg-amber-100 text-amber-700'
-
-                    return (
-                      <span className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${colorClass}`}>
-                        {percent}%
-                      </span>
-                    )
-                  })()}
-                </div>
-                <div className="hidden text-sm text-muted-foreground md:block whitespace-nowrap">{formatDate(todo.updatedAt)}</div>
-                <div className="hidden text-sm text-muted-foreground md:block whitespace-nowrap">{formatDate(todo.createdAt)}</div>
-                <div className="relative flex justify-end">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onOpenMenuChange((current) => (current === todo.id ? null : todo.id))
-                    }}
-                    title="More actions"
-                  >
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                  {openMenuId === todo.id && (
-                    <div
-                      className="absolute right-0 top-9 z-30 w-44 rounded-md border border-border bg-background p-1 shadow-xl"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <button
-                        className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-muted"
-                        onClick={() => {
-                          onEditTodo(todo)
-                          onOpenMenuChange(null)
-                        }}
-                      >
-                        <Edit3 className="h-4 w-4" /> Edit
-                      </button>
-                      <button
-                        className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-muted"
-                        onClick={() => onCompleteTodos([todo.id])}
-                      >
-                        <CheckCheck className="h-4 w-4" /> Mark completed
-                      </button>
-                      <button
-                        className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm hover:bg-muted"
-                        onClick={() => onDuplicateTodo(todo)}
-                      >
-                        <Copy className="h-4 w-4" /> Duplicate
-                      </button>
-                      <button
-                        className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-sm text-destructive hover:bg-muted"
-                        onClick={() => onDeleteTodos([todo.id])}
-                      >
-                        <Trash2 className="h-4 w-4" /> Delete
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
+          ))}
         </div>
       )}
     </section>
   )
+}
+
+function greeting() {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'Good morning'
+  if (hour < 18) return 'Good afternoon'
+  return 'Good evening'
+}
+
+function StatChip({ label, value, tone }) {
+  return (
+    <div className="text-center">
+      <div className={`text-lg font-bold leading-none ${tone === 'danger' ? 'text-rose-500' : ''}`}>
+        {value}
+      </div>
+      <div className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+    </div>
+  )
+}
+
+/** Compact SVG ring; no chart dependency for a single number. */
+function ProgressRing({ percent, size = 52 }) {
+  const stroke = 5
+  const radius = (size - stroke) / 2
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference - (percent / 100) * circumference
+
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle
+          cx={size / 2} cy={size / 2} r={radius}
+          fill="none" stroke="hsl(var(--muted))" strokeWidth={stroke}
+        />
+        <circle
+          cx={size / 2} cy={size / 2} r={radius}
+          fill="none" stroke="hsl(var(--primary))" strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          className="transition-[stroke-dashoffset] duration-500"
+        />
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center text-xs font-bold">
+        {percent}%
+      </span>
+    </div>
+  )
+}
+
+function TodoListCard({
+  todo, isSelected, menuOpen, onToggleMenu, onOpen, onToggleSelect,
+  onEdit, onDuplicate, onComplete, onDelete,
+}) {
+  const total = todo.taskCount ?? 0
+  const done = todo.completedTaskCount ?? 0
+  const pct = total ? Math.round((done / total) * 100) : 0
+  const complete = total > 0 && done === total
+  const priority = priorityOptions.find((p) => p.value === (todo.priority ?? 0))
+
+  return (
+    <div
+      className={`group relative flex cursor-pointer flex-col rounded-xl border bg-background p-4 transition-all hover:-translate-y-0.5 hover:shadow-lg ${
+        isSelected ? 'border-primary ring-2 ring-primary/30' : 'border-border hover:border-primary/40'
+      }`}
+      onClick={onOpen}
+    >
+      <div className="flex items-start gap-2">
+        <input
+          type="checkbox"
+          checked={isSelected}
+          onChange={onToggleSelect}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Select ${todo.title}`}
+          className={`mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary transition-opacity ${
+            isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }`}
+        />
+
+        <div className="min-w-0 flex-1">
+          <h3 className={`truncate font-semibold ${complete ? 'text-muted-foreground line-through' : ''}`}>
+            {todo.title}
+          </h3>
+          {todo.description ? (
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{todo.description}</p>
+          ) : null}
+        </div>
+
+        <div className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            onClick={onToggleMenu}
+            aria-label="List actions"
+            className="rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100"
+          >
+            <MoreVertical className="h-4 w-4" />
+          </button>
+          {menuOpen && (
+            <div className="absolute right-0 top-full z-30 mt-1 w-40 rounded-lg border border-border bg-background p-1 shadow-xl">
+              <MenuItem icon={Edit3} label="Edit" onClick={onEdit} />
+              <MenuItem icon={Copy} label="Duplicate" onClick={onDuplicate} />
+              <MenuItem icon={CheckCheck} label="Complete all" onClick={onComplete} />
+              <MenuItem icon={Trash2} label="Delete" onClick={onDelete} danger />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Progress */}
+      <div className="mt-3">
+        <div className="mb-1 flex items-center justify-between text-[11px] text-muted-foreground">
+          <span>{total === 0 ? 'No tasks yet' : `${done} of ${total} done`}</span>
+          <span className="font-medium">{pct}%</span>
+        </div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className={`h-full rounded-full transition-[width] duration-500 ${
+              complete ? 'bg-emerald-500' : 'bg-primary'
+            }`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Meta */}
+      <div className="mt-3 flex flex-wrap items-center gap-1.5">
+        {priority && priority.value > 0 && (
+          <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${priority.className}`}>
+            {priority.label}
+          </span>
+        )}
+        {todo.targetDate && (
+          <span
+            className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+              dueStateOf(todo.targetDate) === 'overdue'
+                ? 'border-rose-200 bg-rose-100 text-rose-700'
+                : dueStateOf(todo.targetDate) === 'today'
+                  ? 'border-amber-200 bg-amber-100 text-amber-700'
+                  : 'border-border bg-muted text-muted-foreground'
+            }`}
+          >
+            {formatTargetDate(todo.targetDate)}
+          </span>
+        )}
+        {complete && (
+          <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+            Complete
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MenuItem({ icon: Icon, label, onClick, danger }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors hover:bg-muted ${
+        danger ? 'text-red-500 hover:text-red-600' : ''
+      }`}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  )
+}
+
+/** Overdue/today/upcoming, derived here since the API does not send it. */
+function dueStateOf(value) {
+  if (!value) return null
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const now = new Date()
+  const a = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const b = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const days = Math.round((b - a) / 86400000)
+  if (days < 0) return 'overdue'
+  if (days === 0) return 'today'
+  return 'upcoming'
+}
+
+function formatTargetDate(value) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const now = new Date()
+  const a = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const b = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const days = Math.round((b - a) / 86400000)
+  if (days === 0) return 'Today'
+  if (days === 1) return 'Tomorrow'
+  if (days === -1) return 'Yesterday'
+  if (days < 0) return `${Math.abs(days)}d overdue`
+  if (days <= 7) return `In ${days}d`
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }

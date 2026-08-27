@@ -14,14 +14,16 @@ const nullableDateTimeSchema = z.preprocess((value) => {
 const createTodoListSchema = z.object({
   title: z.string().min(1).max(255),
   description: z.string().max(2048).optional(),
-  priority: z.number().int().min(0).max(3).optional(),
+  // 0 = unset; 1-5 is the star rating shown in the UI.
+  priority: z.number().int().min(0).max(5).optional(),
   targetDate: nullableDateTimeSchema,
 })
 
 const updateTodoListSchema = z.object({
   title: z.string().min(1).max(255).optional(),
   description: z.string().max(2048).optional(),
-  priority: z.number().int().min(0).max(3).optional(),
+  // 0 = unset; 1-5 is the star rating shown in the UI.
+  priority: z.number().int().min(0).max(5).optional(),
   targetDate: nullableDateTimeSchema,
 })
 
@@ -29,7 +31,8 @@ const createTodoTaskSchema = z.object({
   title: z.string().min(1).max(512),
   description: z.string().max(5000).optional(),
   completed: z.boolean().optional(),
-  priority: z.number().int().min(0).max(3).optional(),
+  // 0 = unset; 1-5 is the star rating shown in the UI.
+  priority: z.number().int().min(0).max(5).optional(),
   dueDate: nullableDateTimeSchema,
 })
 
@@ -37,7 +40,8 @@ const updateTodoTaskSchema = z.object({
   title: z.string().min(1).max(512).optional(),
   description: z.string().max(5000).optional(),
   completed: z.boolean().optional(),
-  priority: z.number().int().min(0).max(3).optional(),
+  // 0 = unset; 1-5 is the star rating shown in the UI.
+  priority: z.number().int().min(0).max(5).optional(),
   dueDate: nullableDateTimeSchema,
   orderIndex: z.number().int().min(0).optional(),
 })

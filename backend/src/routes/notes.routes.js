@@ -1,11 +1,49 @@
 const express = require('express')
 const { z } = require('zod')
-const sanitizeHtml = require('sanitize-html')
+const { sanitizeNoteContent } = require('../utils/note-sanitizer')
 const { createNoteSchema, updateNoteSchema, moveNoteSchema } = require('../validators/notes')
 const { responseEnvelope } = require('../utils/response')
 
 function createNotesRouter({ store, authMiddleware }) {
   const router = express.Router()
+
+  // Workspace-wide note search. Registered before '/:id' so the literal path
+  // is not captured as an id.
+  router.get('/search', authMiddleware, async (req, res) => {
+    try {
+      const { q, workspaceId } = req.query
+
+      if (!workspaceId) {
+        return res.status(400).json(
+          responseEnvelope(null, {
+            code: 'VALIDATION_ERROR',
+            message: 'workspaceId query parameter is required',
+          }),
+        )
+      }
+
+      const query = String(q ?? '').trim()
+      if (!query) {
+        return res.json(responseEnvelope({ items: [], query: '' }))
+      }
+
+      const [items, folderPaths] = await Promise.all([
+        store.searchNotes({ userId: req.user.id, workspaceId, query }),
+        store.getNotesFolderPathMap({ userId: req.user.id, workspaceId }),
+      ])
+
+      const withPaths = items.map((item) => {
+        const names = item.parentId ? (folderPaths.get(String(item.parentId)) ?? []) : []
+        return { ...item, path: ['Notes', ...names].join(' / ') }
+      })
+
+      return res.json(responseEnvelope({ items: withPaths, query }))
+    } catch {
+      return res.status(500).json(
+        responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Search failed' }),
+      )
+    }
+  })
 
   router.get('/', authMiddleware, async (req, res) => {
     try {
@@ -44,26 +82,13 @@ function createNotesRouter({ store, authMiddleware }) {
         sortOrder: sortOrder || 'asc',
       })
 
-      // Combine folders and notes into single items array
-      const items = [...(folders || []), ...(notes || [])]
-        .sort((a, b) => {
-          if (sortBy === 'title') {
-            return sortOrder === 'asc' 
-              ? a.title.localeCompare(b.title)
-              : b.title.localeCompare(a.title)
-          } else if (sortBy === 'createdAt') {
-            return sortOrder === 'asc'
-              ? new Date(a.createdAt) - new Date(b.createdAt)
-              : new Date(b.createdAt) - new Date(a.createdAt)
-          } else if (sortBy === 'updatedAt') {
-            return sortOrder === 'asc'
-              ? new Date(a.updatedAt) - new Date(b.updatedAt)
-              : new Date(b.updatedAt) - new Date(a.updatedAt)
-          } else {
-            // position (default)
-            return sortOrder === 'asc' ? a.position - b.position : b.position - a.position
-          }
-        })
+      // Reuse the shared comparator so Notes and Resources order identically,
+      // including folders-first grouping.
+      const items = store._sortItems(
+        [...(folders || []), ...(notes || [])],
+        sortBy || 'position',
+        sortOrder || 'asc',
+      )
 
       let breadcrumbs = []
       if (parentId) {
@@ -98,11 +123,7 @@ function createNotesRouter({ store, authMiddleware }) {
         }
       }
 
-      const cleanedContent = sanitizeHtml(payload.content ?? '', {
-        allowedTags: [ 'b','i','em','strong','u','a','p','br','ul','ol','li','blockquote','code','pre','h1','h2','h3','h4','h5','h6' ],
-        allowedAttributes: { a: [ 'href', 'rel', 'target' ], code: [ 'class' ], pre: [ 'class' ] },
-        allowedSchemes: [ 'http', 'https', 'mailto' ],
-      })
+      const cleanedContent = sanitizeNoteContent(payload.content)
 
       const note = await store.createNote({
         title: payload.title.trim(),
@@ -159,11 +180,7 @@ function createNotesRouter({ store, authMiddleware }) {
 
       // sanitize content if present
       if (typeof payload.content === 'string') {
-        payload.content = sanitizeHtml(payload.content, {
-          allowedTags: [ 'b','i','em','strong','u','a','p','br','ul','ol','li','blockquote','code','pre','h1','h2','h3','h4','h5','h6' ],
-          allowedAttributes: { a: [ 'href', 'rel', 'target' ], code: [ 'class' ], pre: [ 'class' ] },
-          allowedSchemes: [ 'http', 'https', 'mailto' ],
-        })
+        payload.content = sanitizeNoteContent(payload.content)
       }
 
       const note = await store.updateNote(req.params.id, req.user.id, payload)
