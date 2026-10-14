@@ -9,6 +9,7 @@ import { useWorkspace } from '../contexts/workspace-context'
 import { Button } from '../components/ui/button'
 import { Breadcrumbs } from '../components/resources/breadcrumbs'
 import { ViewToggle } from '../components/resources/view-toggle'
+import { SortMenu } from '../components/resources/sort-menu'
 import { ResourceCard, ResourceListItem, ResourceListHeader, ResourceTable } from '../components/resources/resource-views'
 import { ResourceSearch } from '../components/resources/resource-search'
 import { CreateFolderDialog } from '../components/resources/create-folder-dialog'
@@ -35,8 +36,25 @@ export function ResourcesPage() {
     [setSearchParams],
   )
   const [view, setView] = useState(() => localStorage.getItem('vault-view') ?? 'grid')
-  const [sortBy, setSortBy] = useState('position')
-  const [sortOrder, setSortOrder] = useState('asc')
+  // Sort is remembered across visits, like the view.
+  const [{ sortBy, sortOrder }, setSort] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('vault-resource-sort'))
+      if (saved?.sortBy && saved?.sortOrder) return saved
+    } catch {
+      // Fall through to the default.
+    }
+    return { sortBy: 'position', sortOrder: 'asc' }
+  })
+  const changeSort = (nextBy, nextOrder) => {
+    const next = { sortBy: nextBy, sortOrder: nextOrder }
+    setSort(next)
+    try {
+      localStorage.setItem('vault-resource-sort', JSON.stringify(next))
+    } catch {
+      // Not persisted; still applies for this visit.
+    }
+  }
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
 
@@ -300,14 +318,9 @@ export function ResourcesPage() {
     )
   }
 
-  const handleSort = (field) => {
-    if (sortBy === field) {
-      setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setSortBy(field)
-      setSortOrder('asc')
-    }
-  }
+  // List/table header click: toggle direction on the active column.
+  const handleSort = (field) =>
+    changeSort(field, sortBy === field && sortOrder === 'asc' ? 'desc' : 'asc')
 
   // ─── Context Menu Items ────────────────────────────────────────
   const getContextMenuItems = (item) => [
@@ -370,6 +383,7 @@ export function ResourcesPage() {
           {/* Actions wrap rather than overflow on narrow screens */}
           <div className="flex flex-wrap items-center gap-2">
             <ViewToggle activeView={view} onViewChange={setView} />
+            <SortMenu sortBy={sortBy} sortOrder={sortOrder} onChange={changeSort} />
             <Button size="sm" variant="outline" onClick={() => setShowCreateFolder(true)}>
               <FolderPlus className="mr-1.5 h-4 w-4" />
               <span className="hidden xs:inline">Folder</span>
