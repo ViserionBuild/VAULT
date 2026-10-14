@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
 import {
   FolderPlus, Plus, RefreshCw,
   Pencil, Trash2, Star, FolderInput, ExternalLink, CheckSquare
@@ -9,8 +8,11 @@ import { useWorkspace } from '../contexts/workspace-context'
 import { Button } from '../components/ui/button'
 import { Breadcrumbs } from '../components/resources/breadcrumbs'
 import { ViewToggle } from '../components/resources/view-toggle'
-import { SortMenu } from '../components/resources/sort-menu'
-import { isItemDrag, useItemDragDrop } from '../components/resources/use-item-drag-drop'
+import { SortMenu } from '../components/items/sort-menu'
+import { useFolderParam } from '../hooks/use-folder-param'
+import { usePersistentSort } from '../hooks/use-persistent-sort'
+import { useItemShortcuts } from '../hooks/use-item-shortcuts'
+import { isItemDrag, useItemDragDrop } from '../components/items/use-item-drag-drop'
 import { ResourceCard, ResourcePreviewCard, ResourceListItem, ResourceListHeader, ResourceTable } from '../components/resources/resource-views'
 import { ResourceSearch } from '../components/resources/resource-search'
 import { CreateFolderDialog } from '../components/resources/create-folder-dialog'
@@ -29,34 +31,10 @@ export function ResourcesPage() {
 
   const [items, setItems] = useState([])
   const [breadcrumbs, setBreadcrumbs] = useState([])
-  // The open folder lives in the URL (?folder=<id>), so Back goes up a level,
-  // refresh stays put, and a folder can be bookmarked or shared.
-  const [searchParams, setSearchParams] = useSearchParams()
-  const currentFolder = searchParams.get('folder')
-  const openFolder = useCallback(
-    (folderId) => setSearchParams(folderId ? { folder: folderId } : {}),
-    [setSearchParams],
-  )
+  const { currentFolder, openFolder } = useFolderParam(activeWorkspace?.id)
   const [view, setView] = useState(() => localStorage.getItem('vault-view') ?? 'grid')
   // Sort is remembered across visits, like the view.
-  const [{ sortBy, sortOrder }, setSort] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('vault-resource-sort'))
-      if (saved?.sortBy && saved?.sortOrder) return saved
-    } catch {
-      // Fall through to the default.
-    }
-    return { sortBy: 'position', sortOrder: 'asc' }
-  })
-  const changeSort = (nextBy, nextOrder) => {
-    const next = { sortBy: nextBy, sortOrder: nextOrder }
-    setSort(next)
-    try {
-      localStorage.setItem('vault-resource-sort', JSON.stringify(next))
-    } catch {
-      // Not persisted; still applies for this visit.
-    }
-  }
+  const { sortBy, sortOrder, changeSort, toggleColumn } = usePersistentSort('vault-resource-sort')
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
 
@@ -82,13 +60,6 @@ export function ResourcesPage() {
     setSelectedIds([])
   }
 
-  // A folder from another workspace would show empty; go back to its root.
-  const workspaceIdRef = useRef(activeWorkspace?.id)
-  useEffect(() => {
-    const previous = workspaceIdRef.current
-    workspaceIdRef.current = activeWorkspace?.id
-    if (previous && activeWorkspace?.id && previous !== activeWorkspace.id) openFolder(null)
-  }, [activeWorkspace?.id, openFolder])
 
   // Context menu
   const { contextMenu, handleContextMenu, closeContextMenu } = useContextMenu()
@@ -352,41 +323,13 @@ export function ResourcesPage() {
       offerUndo(deletedIds)
     }, 'Could not delete the selected items. Please try again.')
 
-  // Page-level keys (when not typing and no dialog is open): arrows move
-  // between items, Ctrl/Cmd+A selects all, Delete removes the selection,
-  // Escape clears it.
-  // Latest values for the listener, without re-subscribing it every render.
-  const keyActionsRef = useRef(null)
-  useEffect(() => {
-    keyActionsRef.current = { items, selectedIds, handleBulkDelete }
+  useItemShortcuts({
+    items,
+    selectedIds,
+    setSelectedIds,
+    onDeleteSelected: handleBulkDelete,
+    disabled: anyDialogOpen || Boolean(contextMenu),
   })
-  useEffect(() => {
-    const onKeyDown = (event) => {
-      if (anyDialogOpen || contextMenu) return
-      if (event.target.closest?.('input, textarea, select, [contenteditable="true"]')) return
-      const { items: current, selectedIds: selected, handleBulkDelete: deleteSelected } = keyActionsRef.current
-
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
-        event.preventDefault()
-        setSelectedIds(current.map((item) => item.id))
-      } else if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length > 0) {
-        event.preventDefault()
-        deleteSelected()
-      } else if (event.key === 'Escape' && selected.length > 0) {
-        setSelectedIds([])
-      } else if (['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(event.key)) {
-        const nodes = [...document.querySelectorAll('main [data-item-id]')]
-        if (nodes.length === 0) return
-        event.preventDefault()
-        const index = nodes.indexOf(document.activeElement)
-        const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
-        const next = index === -1 ? 0 : Math.min(nodes.length - 1, Math.max(0, index + step))
-        nodes[next].focus()
-      }
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => document.removeEventListener('keydown', onKeyDown)
-  }, [anyDialogOpen, contextMenu])
 
   const handleMove = async (targetParentId) => {
     await api('/items/bulk', {
@@ -442,9 +385,7 @@ export function ResourcesPage() {
     )
   }
 
-  // List/table header click: toggle direction on the active column.
-  const handleSort = (field) =>
-    changeSort(field, sortBy === field && sortOrder === 'asc' ? 'desc' : 'asc')
+  const handleSort = toggleColumn
 
   // ─── Context Menu Items ────────────────────────────────────────
   const getContextMenuItems = (item) => [

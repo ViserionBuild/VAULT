@@ -1083,6 +1083,29 @@ class SupabaseStore {
     return entry.item
   }
 
+  // Notes and note folders live in separate tables; send the update to
+  // whichever holds this id. Folders take only a title and description.
+  async updateNoteItem(itemId, userId, updates) {
+    const entry = await this._fetchNoteItemEntry(itemId, userId)
+    if (!entry.item) return null
+    if (entry.table === 'notes') return this.updateNote(itemId, userId, updates)
+
+    const payload = { updated_at: new Date().toISOString() }
+    if (updates.title !== undefined) payload.title = updates.title
+    if (updates.description !== undefined) payload.description = updates.description
+
+    const { data, error } = await this.client
+      .from('notes_folders')
+      .update(payload)
+      .eq('id', String(itemId))
+      .eq('user_id', String(userId))
+      .select('*')
+      .single()
+
+    if (error) throw error
+    return mapNoteFolderRow(data)
+  }
+
   async softDeleteNoteItem(itemId, userId) {
     const entry = await this._fetchNoteItemEntry(itemId, userId)
     if (!entry.item) return null
