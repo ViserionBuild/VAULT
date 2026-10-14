@@ -103,7 +103,15 @@ export function EditItemDialog({ open, onClose, item, onSubmit }) {
         {item.type === 'url' && (
           <div>
             <label className="mb-1.5 block text-sm font-medium">URL</label>
-            <Input value={url} onChange={(e) => setUrl(e.target.value)} type="url" />
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              type="text"
+              inputMode="url"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+            />
           </div>
         )}
 

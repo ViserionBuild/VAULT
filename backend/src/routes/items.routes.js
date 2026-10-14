@@ -9,6 +9,14 @@ const {
 const { responseEnvelope } = require('../utils/response')
 const { fetchUrlMetadata } = require('../services/metadata-service')
 
+function hostnameOf(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return url
+  }
+}
+
 function createItemsRouter({ store, authMiddleware, metadataService }) {
   const router = express.Router()
   const fetchMetadata = metadataService ?? fetchUrlMetadata
@@ -143,8 +151,10 @@ function createItemsRouter({ store, authMiddleware, metadataService }) {
         )
       }
 
+      const titleProvided = Boolean(payload.title)
       const item = await store.createItem({
-        title: payload.title.trim(),
+        // Untitled links show their domain until the page title arrives.
+        title: payload.title || hostnameOf(payload.url),
         type: payload.type,
         url: payload.url,
         description: payload.description ?? '',
@@ -160,7 +170,7 @@ function createItemsRouter({ store, authMiddleware, metadataService }) {
         fetchMetadata(item.url)
           .then(async (meta) => {
             const updates = {}
-            if (meta.title && !payload.title) updates.title = meta.title
+            if (meta.title && !titleProvided) updates.title = meta.title
             if (meta.description && !payload.description) updates.description = meta.description
             if (meta.favicon) updates.icon = meta.favicon
             if (meta.ogImage) updates.thumbnail = meta.ogImage

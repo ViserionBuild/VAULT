@@ -15,7 +15,8 @@ export function AddResourceDialog({ open, onClose, onSubmit }) {
     setLoading(true)
     try {
       await onSubmit({
-        title: title.trim() || extractDomain(url),
+        // Omitted when blank so the server fills in the page's own title.
+        title: title.trim() || undefined,
         url: url.trim(),
         description: description.trim(),
       })
@@ -36,8 +37,14 @@ export function AddResourceDialog({ open, onClose, onSubmit }) {
           <Input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://example.com/article"
-            type="url"
+            placeholder="example.com/article"
+            // Plain text, not type="url": that rejects "github.com" without a
+            // scheme. The server adds https:// when it is missing.
+            type="text"
+            inputMode="url"
+            autoCapitalize="off"
+            autoCorrect="off"
+            spellCheck={false}
             autoFocus
             required
           />
@@ -76,12 +83,4 @@ export function AddResourceDialog({ open, onClose, onSubmit }) {
       </form>
     </Dialog>
   )
-}
-
-function extractDomain(url) {
-  try {
-    return new URL(url).hostname
-  } catch {
-    return url
-  }
 }
