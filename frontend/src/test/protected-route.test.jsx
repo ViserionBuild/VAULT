@@ -24,7 +24,7 @@ describe('ProtectedRoute', () => {
 
   it('redirects unauthenticated users to login page', () => {
     renderApp(['/'])
-    expect(screen.getByText('Sign in to VAULT')).toBeInTheDocument()
+    expect(screen.getByText('Welcome back')).toBeInTheDocument()
   })
 
   it('keeps persisted theme in localStorage', () => {
