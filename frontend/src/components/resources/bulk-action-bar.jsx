@@ -13,9 +13,12 @@ export function BulkActionBar({ count, onDelete, onMove, onTag, onClear }) {
       <Button variant="ghost" size="sm" onClick={onMove} title="Move">
         <FolderInput className="h-4 w-4 xs:mr-1.5" /> <span className="hidden xs:inline">Move</span>
       </Button>
-      <Button variant="ghost" size="sm" onClick={onTag} title="Tag">
-        <Tag className="h-4 w-4 xs:mr-1.5" /> <span className="hidden xs:inline">Tag</span>
-      </Button>
+      {/* Only offered where tagging is implemented. */}
+      {onTag && (
+        <Button variant="ghost" size="sm" onClick={onTag} title="Tag">
+          <Tag className="h-4 w-4 xs:mr-1.5" /> <span className="hidden xs:inline">Tag</span>
+        </Button>
+      )}
       <Button variant="ghost" size="sm" onClick={onDelete} className="text-red-500 hover:text-red-400" title="Delete">
         <Trash2 className="h-4 w-4 xs:mr-1.5" /> <span className="hidden xs:inline">Delete</span>
       </Button>

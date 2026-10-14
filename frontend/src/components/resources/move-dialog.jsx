@@ -8,6 +8,13 @@ export function MoveDialog({ open, onClose, onSubmit, api, workspaceId, basePath
   const [breadcrumbs, setBreadcrumbs] = useState([])
   const [selected, setSelected] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  // Don't show a stale error the next time the dialog opens.
+  const handleClose = () => {
+    setError('')
+    onClose()
+  }
 
   const fetchFolders = useCallback(async (parentId) => {
     if (!workspaceId) return
@@ -30,16 +37,19 @@ export function MoveDialog({ open, onClose, onSubmit, api, workspaceId, basePath
 
   const handleSubmit = async () => {
     setLoading(true)
+    setError('')
     try {
       await onSubmit(selected)
       onClose()
+    } catch (err) {
+      setError(err.message || 'Could not move. Please try again.')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title="Move to Folder">
+    <Dialog open={open} onClose={handleClose} title="Move to Folder">
       <div className="space-y-3">
         {/* Breadcrumb */}
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -105,8 +115,14 @@ export function MoveDialog({ open, onClose, onSubmit, api, workspaceId, basePath
           )}
         </div>
 
+        {error && (
+          <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">
+            {error}
+          </p>
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button variant="ghost" onClick={handleClose}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={loading}>
             {loading ? 'Moving...' : 'Move Here'}
           </Button>

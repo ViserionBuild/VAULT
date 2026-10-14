@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Search, X, Folder, Globe, CornerDownLeft } from 'lucide-react'
+import { Search, X, Globe, CornerDownLeft } from 'lucide-react'
 import defaultLinkIcon from '../../assets/default_link_icon.png'
+import { FolderGlyph } from './folder-appearance'
 
 /**
  * Drive-style single search box: one field that searches names, URLs, and
@@ -182,13 +183,7 @@ export function ResourceSearch({
 function ResultIcon({ item }) {
   const color = item.color || item.metadata?.color
 
-  if (item.type === 'folder') {
-    return item.icon ? (
-      <span className="text-base" style={color ? { color } : {}}>{item.icon}</span>
-    ) : (
-      <Folder className="h-4 w-4 shrink-0 text-primary/70" style={color ? { color } : {}} />
-    )
-  }
+  if (item.type === 'folder') return <FolderGlyph icon={item.icon} color={color} size="sm" />
 
   if (item.icon?.startsWith('http')) {
     return (

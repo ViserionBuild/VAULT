@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
-  FolderPlus, Plus, ArrowUpDown, RefreshCw,
-  Pencil, Trash2, Star, FolderInput, ExternalLink, RotateCcw, Tag, CheckSquare
+  FolderPlus, Plus, RefreshCw,
+  Pencil, Trash2, Star, FolderInput, ExternalLink, CheckSquare
 } from 'lucide-react'
 import { useApi } from '../hooks/use-api'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -16,35 +17,65 @@ import { EditItemDialog } from '../components/resources/edit-item-dialog'
 import { BulkActionBar } from '../components/resources/bulk-action-bar'
 import { MoveDialog } from '../components/resources/move-dialog'
 import { ContextMenu, useContextMenu } from '../components/ui/context-menu'
+import { useToast } from '../components/ui/toast'
 
 export function ResourcesPage() {
   const api = useApi()
+  const toast = useToast()
   const { activeWorkspace } = useWorkspace()
 
   const [items, setItems] = useState([])
   const [breadcrumbs, setBreadcrumbs] = useState([])
-  const [currentFolder, setCurrentFolder] = useState(null)
+  // The open folder lives in the URL (?folder=<id>), so Back goes up a level,
+  // refresh stays put, and a folder can be bookmarked or shared.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const currentFolder = searchParams.get('folder')
+  const openFolder = useCallback(
+    (folderId) => setSearchParams(folderId ? { folder: folderId } : {}),
+    [setSearchParams],
+  )
   const [view, setView] = useState(() => localStorage.getItem('vault-view') ?? 'grid')
   const [sortBy, setSortBy] = useState('position')
   const [sortOrder, setSortOrder] = useState('asc')
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
 
   // Dialogs
   const [showCreateFolder, setShowCreateFolder] = useState(false)
   const [showAddResource, setShowAddResource] = useState(false)
   const [editItem, setEditItem] = useState(null)
-  const [showMoveDialog, setShowMoveDialog] = useState(false)
+  // Items being moved: one item from its menu, or the current selection.
+  // Kept apart from the selection so cancelling a move leaves it untouched.
+  const [moveIds, setMoveIds] = useState(null)
 
-  // Selection
+  // Selection, cleared whenever the folder changes (including via Back).
   const [selectedIds, setSelectedIds] = useState([])
+  const [selectionFolder, setSelectionFolder] = useState(currentFolder)
+  if (selectionFolder !== currentFolder) {
+    setSelectionFolder(currentFolder)
+    setSelectedIds([])
+  }
+
+  // A folder from another workspace would show empty; go back to its root.
+  const workspaceIdRef = useRef(activeWorkspace?.id)
+  useEffect(() => {
+    const previous = workspaceIdRef.current
+    workspaceIdRef.current = activeWorkspace?.id
+    if (previous && activeWorkspace?.id && previous !== activeWorkspace.id) openFolder(null)
+  }, [activeWorkspace?.id, openFolder])
 
   // Context menu
   const { contextMenu, handleContextMenu, closeContextMenu } = useContextMenu()
 
   // ─── Fetch items ───────────────────────────────────────────────
+  // Only the latest request may update the list: clicking through folders
+  // quickly must not let a slow earlier response show the wrong folder.
+  const fetchIdRef = useRef(0)
   const fetchItems = useCallback(async () => {
     if (!activeWorkspace) return
+    const fetchId = ++fetchIdRef.current
     setLoading(true)
+    setLoadError(false)
     try {
       const params = new URLSearchParams({
         workspaceId: activeWorkspace.id,
@@ -53,12 +84,14 @@ export function ResourcesPage() {
       })
       if (currentFolder) params.set('parentId', currentFolder)
       const data = await api(`/items?${params}`)
+      if (fetchId !== fetchIdRef.current) return
       setItems(data.items ?? [])
       setBreadcrumbs(data.breadcrumbs ?? [])
     } catch {
-      // ignore
+      // Shown as an error state; an empty list would wrongly read "No items yet".
+      if (fetchId === fetchIdRef.current) setLoadError(true)
     } finally {
-      setLoading(false)
+      if (fetchId === fetchIdRef.current) setLoading(false)
     }
   }, [api, activeWorkspace, currentFolder, sortBy, sortOrder])
 
@@ -71,19 +104,30 @@ export function ResourcesPage() {
   }, [view])
 
   // ─── Actions ───────────────────────────────────────────────────
+  // One-click actions update the list immediately, then confirm with the
+  // server. On failure they report it in a toast and reload the true state.
+  // (Dialog actions throw instead, so the dialog can show the error inline.)
+  const attempt = async (action, failMessage) => {
+    try {
+      await action()
+    } catch (error) {
+      toast.error(error.status === 400 && error.message ? error.message : failMessage)
+      fetchItems()
+    }
+  }
+
+  const removeLocally = (itemIds) =>
+    setItems((prev) => prev.filter((item) => !itemIds.includes(item.id)))
+
   const handleOpen = (item) => {
     if (item.type === 'folder') {
-      setCurrentFolder(item.id)
-      setSelectedIds([])
+      openFolder(item.id)
     } else if (item.url) {
       window.open(item.url, '_blank', 'noopener,noreferrer')
     }
   }
 
-  const handleNavigate = (folderId) => {
-    setCurrentFolder(folderId)
-    setSelectedIds([])
-  }
+  const handleNavigate = openFolder
 
   const handleCreateFolder = async ({ title, icon, color }) => {
     await api('/items', {
@@ -101,8 +145,34 @@ export function ResourcesPage() {
     fetchItems()
   }
 
+  // Stops metadata polling once the page is gone.
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    // Reset on mount too: StrictMode mounts, unmounts and remounts in dev.
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  // The server fetches a new link's title and favicon in the background, which
+  // can take up to ~8s. Poll the item until that lands, then refresh once.
+  const refreshWhenMetadataArrives = async (itemId) => {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      if (!mountedRef.current) return
+      try {
+        const item = await api(`/items/${itemId}`)
+        if (item?.metadata?.fetchedAt) break
+      } catch {
+        return
+      }
+    }
+    if (mountedRef.current) fetchItems()
+  }
+
   const handleAddResource = async ({ title, url, description }) => {
-    await api('/items', {
+    const created = await api('/items', {
       method: 'POST',
       body: {
         title,
@@ -113,30 +183,53 @@ export function ResourcesPage() {
         parentId: currentFolder,
       },
     })
-    // Refetch after a short delay to pick up metadata
     fetchItems()
-    setTimeout(fetchItems, 3000)
+    if (created?.id) void refreshWhenMetadataArrives(created.id)
   }
 
   const handleEditItem = async (itemId, updates) => {
-    await api(`/items/${itemId}`, { method: 'PUT', body: updates })
+    const updated = await api(`/items/${itemId}`, { method: 'PUT', body: updates })
+    // Show the saved values at once; the refetch keeps sort order right.
+    setItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, ...updated } : item)))
     fetchItems()
   }
 
-  const handleDelete = async (itemId) => {
-    await api(`/items/${itemId}`, { method: 'DELETE' })
-    fetchItems()
+  // Deleting moves items to Trash; offer an immediate way back.
+  const offerUndo = (itemIds) => {
+    toast.show({
+      message: itemIds.length === 1 ? 'Moved to Trash' : `${itemIds.length} items moved to Trash`,
+      action: {
+        label: 'Undo',
+        onClick: () =>
+          attempt(async () => {
+            await Promise.all(itemIds.map((id) => api(`/items/${id}/restore`, { method: 'POST' })))
+            fetchItems()
+          }, 'Could not restore. You can still restore from Trash.'),
+      },
+    })
   }
 
-  const handleFavorite = async (itemId) => {
-    await api(`/items/${itemId}/favorite`, { method: 'POST' })
-    fetchItems()
-  }
+  const handleDelete = (itemId) =>
+    attempt(async () => {
+      removeLocally([itemId])
+      await api(`/items/${itemId}`, { method: 'DELETE' })
+      offerUndo([itemId])
+    }, 'Could not delete. Please try again.')
 
-  const handleRefreshMeta = async (itemId) => {
-    await api(`/items/${itemId}/metadata`, { method: 'POST' })
-    fetchItems()
-  }
+  const handleFavorite = (itemId) =>
+    attempt(async () => {
+      setItems((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, isFavorite: !item.isFavorite } : item)),
+      )
+      await api(`/items/${itemId}/favorite`, { method: 'POST' })
+    }, 'Could not update favorite. Please try again.')
+
+  const handleRefreshMeta = (itemId) =>
+    attempt(async () => {
+      await api(`/items/${itemId}/metadata`, { method: 'POST' })
+      fetchItems()
+      toast.success('Link details refreshed')
+    }, 'Could not refresh link details. Please try again.')
 
   const handleSelect = (itemId) => {
     setSelectedIds((prev) =>
@@ -144,18 +237,23 @@ export function ResourcesPage() {
     )
   }
 
-  const handleBulkDelete = async () => {
-    await api('/items/bulk', { method: 'POST', body: { action: 'delete', itemIds: selectedIds } })
-    setSelectedIds([])
-    fetchItems()
-  }
+  const handleBulkDelete = () =>
+    attempt(async () => {
+      const deletedIds = selectedIds
+      removeLocally(deletedIds)
+      setSelectedIds([])
+      await api('/items/bulk', { method: 'POST', body: { action: 'delete', itemIds: deletedIds } })
+      offerUndo(deletedIds)
+    }, 'Could not delete the selected items. Please try again.')
 
-  const handleBulkMove = async (targetParentId) => {
+  const handleMove = async (targetParentId) => {
     await api('/items/bulk', {
       method: 'POST',
-      body: { action: 'move', itemIds: selectedIds, targetParentId },
+      body: { action: 'move', itemIds: moveIds, targetParentId },
     })
-    setSelectedIds([])
+    // Moved items have left this folder, so they can't stay selected.
+    if (String(targetParentId ?? '') !== String(currentFolder ?? '')) removeLocally(moveIds)
+    setSelectedIds((prev) => prev.filter((id) => !moveIds.includes(id)))
     fetchItems()
   }
 
@@ -174,7 +272,7 @@ export function ResourcesPage() {
   // Opening a folder hit navigates into it; a link hit opens as usual.
   const handleOpenSearchResult = (item) => {
     if (item.type === 'folder') {
-      setCurrentFolder(item.id)
+      openFolder(item.id)
       return
     }
     handleOpen(item)
@@ -247,10 +345,7 @@ export function ResourcesPage() {
     {
       label: 'Move to...',
       icon: FolderInput,
-      onClick: () => {
-        setSelectedIds([item.id])
-        setShowMoveDialog(true)
-      },
+      onClick: () => setMoveIds([item.id]),
     },
     { separator: true },
     {
@@ -299,15 +394,24 @@ export function ResourcesPage() {
         </div>
       )}
 
+      {/* Load failure */}
+      {!loading && loadError && (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <h3 className="text-lg font-semibold">Couldn't load your resources</h3>
+          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+            Check your connection and try again.
+          </p>
+          <Button className="mt-4" variant="outline" onClick={fetchItems}>
+            <RefreshCw className="mr-1.5 h-4 w-4" /> Retry
+          </Button>
+        </div>
+      )}
+
       {/* Empty state */}
-      {!loading && items.length === 0 && (
+      {!loading && !loadError && items.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="mb-4 rounded-2xl bg-muted/50 p-6">
-            {currentFolder ? (
-              <FolderPlus className="h-12 w-12 text-muted-foreground/40" />
-            ) : (
-              <FolderPlus className="h-12 w-12 text-muted-foreground/40" />
-            )}
+            <FolderPlus className="h-12 w-12 text-muted-foreground/40" />
           </div>
           <h3 className="text-lg font-semibold">
             {currentFolder ? 'No files exist' : 'No items yet'}
@@ -322,7 +426,7 @@ export function ResourcesPage() {
               <FolderPlus className="mr-1.5 h-4 w-4" /> New Folder
             </Button>
             <Button onClick={() => setShowAddResource(true)}>
-              <Plus className="mr-1.5 h-4 w-4" /> {currentFolder ? 'Add Resource' : 'Add Resource'}
+              <Plus className="mr-1.5 h-4 w-4" /> Add Resource
             </Button>
           </div>
         </div>
@@ -434,8 +538,7 @@ export function ResourcesPage() {
       <BulkActionBar
         count={selectedIds.length}
         onDelete={handleBulkDelete}
-        onMove={() => setShowMoveDialog(true)}
-        onTag={() => {}} // Tag dialog would go here
+        onMove={() => setMoveIds(selectedIds)}
         onClear={() => setSelectedIds([])}
       />
 
@@ -466,11 +569,9 @@ export function ResourcesPage() {
         onSubmit={handleEditItem}
       />
       <MoveDialog
-        open={showMoveDialog}
-        onClose={() => {
-          setShowMoveDialog(false)
-        }}
-        onSubmit={handleBulkMove}
+        open={moveIds !== null}
+        onClose={() => setMoveIds(null)}
+        onSubmit={handleMove}
         api={api}
         workspaceId={activeWorkspace?.id}
       />

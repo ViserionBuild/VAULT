@@ -20,10 +20,20 @@ export function setCsrfToken(token) {
   }
 }
 
+// fetch rejects with a bare "Failed to fetch" when offline or the server is
+// unreachable; give callers a message worth showing to the user.
+async function fetchOrExplain(url, init) {
+  try {
+    return await fetch(url, init)
+  } catch {
+    throw new Error("Can't reach the server. Check your connection and try again.")
+  }
+}
+
 export async function apiRequest(path, { token, body, method = 'GET' } = {}) {
   const csrfToken = localStorage.getItem(CSRF_KEY) ?? getCookie('vault_csrf_token')
 
-  const response = await fetch(`${API_ROOT}${path}`, {
+  const response = await fetchOrExplain(`${API_ROOT}${path}`, {
     method,
     credentials: 'include',
     headers: {
