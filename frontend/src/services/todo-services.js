@@ -34,3 +34,7 @@ export function deleteTodoTask(api, taskId) {
 export function restoreTodoList(api, listId) {
   return api(`/todo/lists/${listId}/restore`, { method: 'POST' })
 }
+
+export function restoreTodoTask(api, taskId) {
+  return api(`/todo/tasks/${taskId}/restore`, { method: 'POST' })
+}

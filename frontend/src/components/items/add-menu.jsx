@@ -1,52 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
-import { ClipboardPaste, FolderPlus, Link2, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { useIsMobile } from '../../hooks/use-media-query'
 
-const canReadClipboard = typeof navigator !== 'undefined' && Boolean(navigator.clipboard?.readText)
-
-const OPTIONS = [
-  {
-    id: 'folder',
-    key: 'f',
-    label: 'New folder',
-    hint: 'Group related links together',
-    icon: FolderPlus,
-    tile: 'from-amber-400 to-orange-500',
-  },
-  {
-    id: 'link',
-    key: 'l',
-    label: 'Add link',
-    hint: 'Save a website by its URL',
-    icon: Link2,
-    tile: 'from-sky-400 to-indigo-500',
-  },
-  {
-    id: 'paste',
-    key: 'v',
-    label: 'Paste link',
-    hint: 'Add the link on your clipboard',
-    icon: ClipboardPaste,
-    tile: 'from-emerald-400 to-teal-500',
-  },
-].filter((option) => option.id !== 'paste' || canReadClipboard)
+export const canReadClipboard = typeof navigator !== 'undefined' && Boolean(navigator.clipboard?.readText)
 
 /**
  * One "+" for everything that can be added here. A dropdown under the header
  * button on larger screens; a floating button with a speed dial on phones.
- * Press N to open it, then F, L or V (or arrows and Enter).
+ * Press N to open it, then an option's key (or arrows and Enter).
+ *
+ * `tip`: optional footer line in the dropdown.
+ * `options`: [{ id, key, label, hint, icon, tile (gradient classes), onSelect }]
  */
-export function AddMenu({ onNewFolder, onAddLink, onPasteLink, locationName, disabled, hideFab }) {
+export function AddMenu({ options, locationName, tip, disabled, hideFab }) {
   const isMobile = useIsMobile()
   const [open, setOpen] = useState(false)
   const rootRef = useRef(null)
   const triggerRef = useRef(null)
   const fabRef = useRef(null)
 
-  const actions = { folder: onNewFolder, link: onAddLink, paste: onPasteLink }
   const choose = (id) => {
     setOpen(false)
-    actions[id]?.()
+    options.find((option) => option.id === id)?.onSelect()
   }
   const close = ({ refocus = false } = {}) => {
     setOpen(false)
@@ -87,7 +62,7 @@ export function AddMenu({ onNewFolder, onAddLink, onPasteLink, locationName, dis
     event.stopPropagation()
     const items = [...rootRef.current.querySelectorAll('[role="menuitem"]')]
     const index = items.indexOf(document.activeElement)
-    const option = OPTIONS.find((o) => o.key === event.key.toLowerCase())
+    const option = options.find((o) => o.key === event.key.toLowerCase())
     if (event.key === 'Escape') {
       event.preventDefault()
       close({ refocus: true })
@@ -139,7 +114,7 @@ export function AddMenu({ onNewFolder, onAddLink, onPasteLink, locationName, dis
             <p className="truncate px-2.5 pb-1.5 pt-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
               Add to {locationName}
             </p>
-            {OPTIONS.map((option) => (
+            {options.map((option) => (
               <button
                 key={option.id}
                 type="button"
@@ -161,9 +136,11 @@ export function AddMenu({ onNewFolder, onAddLink, onPasteLink, locationName, dis
                 </kbd>
               </button>
             ))}
-            <p className="mt-1 border-t border-border px-2.5 pb-1 pt-2 text-[11px] text-muted-foreground">
-              Tip: you can also drop or paste a link anywhere on the page.
-            </p>
+            {tip && (
+              <p className="mt-1 border-t border-border px-2.5 pb-1 pt-2 text-[11px] text-muted-foreground">
+                {tip}
+              </p>
+            )}
           </div>
         )}
       </div>
@@ -188,13 +165,13 @@ export function AddMenu({ onNewFolder, onAddLink, onPasteLink, locationName, dis
               <p className="mr-1 max-w-[70vw] truncate text-xs font-medium text-muted-foreground animate-in fade-in">
                 Add to {locationName}
               </p>
-              {OPTIONS.map((option, i) => (
+              {options.map((option, i) => (
                 <button
                   key={option.id}
                   type="button"
                   role="menuitem"
                   onClick={() => choose(option.id)}
-                  style={{ animationDelay: `${(OPTIONS.length - 1 - i) * 40}ms` }}
+                  style={{ animationDelay: `${(options.length - 1 - i) * 40}ms` }}
                   className="flex items-center gap-3 outline-none animate-in slide-in-from-bottom-4"
                 >
                   <span className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium shadow-lg">

@@ -11,6 +11,16 @@ const { responseEnvelope } = require('../utils/response')
 function createTodosRouter({ store, authMiddleware }) {
   const router = express.Router()
 
+  router.get('/trash', authMiddleware, async (req, res) => {
+    try {
+      return res.json(responseEnvelope(await store.getTodoTrash(req.user.id)))
+    } catch {
+      return res.status(500).json(
+        responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Failed to load the Trash' }),
+      )
+    }
+  })
+
   router.get('/lists', authMiddleware, async (req, res) => {
     try {
       const lists = await store.getTodoLists(req.user.id, {
@@ -114,6 +124,54 @@ function createTodosRouter({ store, authMiddleware }) {
     }
   })
 
+  router.delete('/lists/:id/purge', authMiddleware, async (req, res) => {
+    try {
+      const result = await store.purgeTodoList(req.params.id, req.user.id)
+      if (!result) {
+        return res.status(404).json(
+          responseEnvelope(null, { code: 'NOT_FOUND', message: 'Todo list not found in Trash' }),
+        )
+      }
+      return res.json(responseEnvelope({ message: 'Todo list deleted permanently' }))
+    } catch {
+      return res.status(500).json(
+        responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Failed to delete todo list' }),
+      )
+    }
+  })
+
+  router.post('/tasks/:id/restore', authMiddleware, async (req, res) => {
+    try {
+      const result = await store.restoreTodoTask(req.params.id, req.user.id)
+      if (!result) {
+        return res.status(404).json(
+          responseEnvelope(null, { code: 'NOT_FOUND', message: 'Todo task not found in Trash' }),
+        )
+      }
+      return res.json(responseEnvelope(result))
+    } catch {
+      return res.status(500).json(
+        responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Failed to restore todo task' }),
+      )
+    }
+  })
+
+  router.delete('/tasks/:id/purge', authMiddleware, async (req, res) => {
+    try {
+      const result = await store.purgeTodoTask(req.params.id, req.user.id)
+      if (!result) {
+        return res.status(404).json(
+          responseEnvelope(null, { code: 'NOT_FOUND', message: 'Todo task not found in Trash' }),
+        )
+      }
+      return res.json(responseEnvelope({ message: 'Todo task deleted permanently' }))
+    } catch {
+      return res.status(500).json(
+        responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Failed to delete todo task' }),
+      )
+    }
+  })
+
   router.get('/lists/:id/tasks', authMiddleware, async (req, res) => {
     try {
       const tasks = await store.getTodoTasks(req.params.id, req.user.id)
@@ -192,13 +250,13 @@ function createTodosRouter({ store, authMiddleware }) {
 
   router.delete('/tasks/:id', authMiddleware, async (req, res) => {
     try {
-      const ok = await store.deleteTodoTask(req.params.id, req.user.id)
-      if (!ok) {
+      const result = await store.deleteTodoTask(req.params.id, req.user.id)
+      if (!result) {
         return res.status(404).json(
           responseEnvelope(null, { code: 'NOT_FOUND', message: 'Todo task not found' }),
         )
       }
-      return res.json(responseEnvelope({ message: 'Todo task deleted' }))
+      return res.json(responseEnvelope({ message: 'Todo task deleted', trashed: result.trashed }))
     } catch {
       return res.status(500).json(
         responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Failed to delete todo task' }),
