@@ -6,6 +6,15 @@ import {
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
+import { SortMenu } from '../components/items/sort-menu'
+
+const LIST_SORT_OPTIONS = [
+  { value: 'updatedAt', label: 'Recently updated' },
+  { value: 'targetDate', label: 'Target date' },
+  { value: 'priority', label: 'Priority' },
+  { value: 'completion', label: 'Progress' },
+  { value: 'title', label: 'Name' },
+]
 
 const todoTabs = [
   { id: 'pending', label: 'Pending' },
@@ -32,6 +41,9 @@ export function TodoListPage({
   search,
   onSearchChange,
   sortSpec,
+  sortBy,
+  sortOrder,
+  onSortChange,
   activeTab,
   onTabChange,
   selectedIds,
@@ -149,7 +161,8 @@ export function TodoListPage({
           />
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <SortMenu sortBy={sortBy} sortOrder={sortOrder} onChange={onSortChange} options={LIST_SORT_OPTIONS} />
           <div className="flex items-center gap-0.5 rounded-full border border-border bg-muted/40 p-0.5">
             {todoTabs.map((tab) => (
               <button

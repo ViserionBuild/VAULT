@@ -30,3 +30,7 @@ export function updateTodoTask(api, taskId, payload) {
 export function deleteTodoTask(api, taskId) {
   return api(`/todo/tasks/${taskId}`, { method: 'DELETE' })
 }
+
+export function restoreTodoList(api, listId) {
+  return api(`/todo/lists/${listId}/restore`, { method: 'POST' })
+}

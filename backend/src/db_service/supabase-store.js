@@ -1439,6 +1439,20 @@ class SupabaseStore {
     return count ?? 0
   }
 
+  // Undo for a list delete (lists are soft-deleted; tasks are untouched).
+  async restoreTodoList(listId, userId) {
+    const { data, error } = await this.client
+      .from('todo_lists')
+      .update({ is_deleted: false, deleted_at: null, updated_at: new Date().toISOString() })
+      .eq('id', String(listId))
+      .eq('user_id', String(userId))
+      .eq('is_deleted', true)
+      .select('*')
+
+    if (error) throw error
+    return data?.[0] ? mapTodoListRow(data[0]) : null
+  }
+
   async createTodoTask({ listId, userId, title, description, completed, priority, dueDate }) {
     const list = await this.getTodoListById(listId, userId)
     if (!list) return null
