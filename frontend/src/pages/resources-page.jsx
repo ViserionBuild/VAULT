@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   FolderPlus, Plus, ArrowUpDown, RefreshCw,
   Pencil, Trash2, Star, FolderInput, ExternalLink, RotateCcw, Tag, CheckSquare
@@ -25,7 +26,14 @@ export function ResourcesPage() {
 
   const [items, setItems] = useState([])
   const [breadcrumbs, setBreadcrumbs] = useState([])
-  const [currentFolder, setCurrentFolder] = useState(null)
+  // The open folder lives in the URL (?folder=<id>), so Back goes up a level,
+  // refresh stays put, and a folder can be bookmarked or shared.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const currentFolder = searchParams.get('folder')
+  const openFolder = useCallback(
+    (folderId) => setSearchParams(folderId ? { folder: folderId } : {}),
+    [setSearchParams],
+  )
   const [view, setView] = useState(() => localStorage.getItem('vault-view') ?? 'grid')
   const [sortBy, setSortBy] = useState('position')
   const [sortOrder, setSortOrder] = useState('asc')
@@ -40,15 +48,32 @@ export function ResourcesPage() {
   // Kept apart from the selection so cancelling a move leaves it untouched.
   const [moveIds, setMoveIds] = useState(null)
 
-  // Selection
+  // Selection, cleared whenever the folder changes (including via Back).
   const [selectedIds, setSelectedIds] = useState([])
+  const [selectionFolder, setSelectionFolder] = useState(currentFolder)
+  if (selectionFolder !== currentFolder) {
+    setSelectionFolder(currentFolder)
+    setSelectedIds([])
+  }
+
+  // A folder from another workspace would show empty; go back to its root.
+  const workspaceIdRef = useRef(activeWorkspace?.id)
+  useEffect(() => {
+    const previous = workspaceIdRef.current
+    workspaceIdRef.current = activeWorkspace?.id
+    if (previous && activeWorkspace?.id && previous !== activeWorkspace.id) openFolder(null)
+  }, [activeWorkspace?.id, openFolder])
 
   // Context menu
   const { contextMenu, handleContextMenu, closeContextMenu } = useContextMenu()
 
   // ─── Fetch items ───────────────────────────────────────────────
+  // Only the latest request may update the list: clicking through folders
+  // quickly must not let a slow earlier response show the wrong folder.
+  const fetchIdRef = useRef(0)
   const fetchItems = useCallback(async () => {
     if (!activeWorkspace) return
+    const fetchId = ++fetchIdRef.current
     setLoading(true)
     setLoadError(false)
     try {
@@ -59,13 +84,14 @@ export function ResourcesPage() {
       })
       if (currentFolder) params.set('parentId', currentFolder)
       const data = await api(`/items?${params}`)
+      if (fetchId !== fetchIdRef.current) return
       setItems(data.items ?? [])
       setBreadcrumbs(data.breadcrumbs ?? [])
     } catch {
       // Shown as an error state; an empty list would wrongly read "No items yet".
-      setLoadError(true)
+      if (fetchId === fetchIdRef.current) setLoadError(true)
     } finally {
-      setLoading(false)
+      if (fetchId === fetchIdRef.current) setLoading(false)
     }
   }, [api, activeWorkspace, currentFolder, sortBy, sortOrder])
 
@@ -90,17 +116,13 @@ export function ResourcesPage() {
 
   const handleOpen = (item) => {
     if (item.type === 'folder') {
-      setCurrentFolder(item.id)
-      setSelectedIds([])
+      openFolder(item.id)
     } else if (item.url) {
       window.open(item.url, '_blank', 'noopener,noreferrer')
     }
   }
 
-  const handleNavigate = (folderId) => {
-    setCurrentFolder(folderId)
-    setSelectedIds([])
-  }
+  const handleNavigate = openFolder
 
   const handleCreateFolder = async ({ title, icon, color }) => {
     await api('/items', {
@@ -222,7 +244,7 @@ export function ResourcesPage() {
   // Opening a folder hit navigates into it; a link hit opens as usual.
   const handleOpenSearchResult = (item) => {
     if (item.type === 'folder') {
-      setCurrentFolder(item.id)
+      openFolder(item.id)
       return
     }
     handleOpen(item)
@@ -361,11 +383,7 @@ export function ResourcesPage() {
       {!loading && !loadError && items.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="mb-4 rounded-2xl bg-muted/50 p-6">
-            {currentFolder ? (
-              <FolderPlus className="h-12 w-12 text-muted-foreground/40" />
-            ) : (
-              <FolderPlus className="h-12 w-12 text-muted-foreground/40" />
-            )}
+            <FolderPlus className="h-12 w-12 text-muted-foreground/40" />
           </div>
           <h3 className="text-lg font-semibold">
             {currentFolder ? 'No files exist' : 'No items yet'}
@@ -380,7 +398,7 @@ export function ResourcesPage() {
               <FolderPlus className="mr-1.5 h-4 w-4" /> New Folder
             </Button>
             <Button onClick={() => setShowAddResource(true)}>
-              <Plus className="mr-1.5 h-4 w-4" /> {currentFolder ? 'Add Resource' : 'Add Resource'}
+              <Plus className="mr-1.5 h-4 w-4" /> Add Resource
             </Button>
           </div>
         </div>
