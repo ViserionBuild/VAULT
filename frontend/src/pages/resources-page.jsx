@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   FolderPlus, Plus, ArrowUpDown, RefreshCw,
   Pencil, Trash2, Star, FolderInput, ExternalLink, RotateCcw, Tag, CheckSquare
@@ -118,8 +118,34 @@ export function ResourcesPage() {
     fetchItems()
   }
 
+  // Stops metadata polling once the page is gone.
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    // Reset on mount too: StrictMode mounts, unmounts and remounts in dev.
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  // The server fetches a new link's title and favicon in the background, which
+  // can take up to ~8s. Poll the item until that lands, then refresh once.
+  const refreshWhenMetadataArrives = async (itemId) => {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      if (!mountedRef.current) return
+      try {
+        const item = await api(`/items/${itemId}`)
+        if (item?.metadata?.fetchedAt) break
+      } catch {
+        return
+      }
+    }
+    if (mountedRef.current) fetchItems()
+  }
+
   const handleAddResource = async ({ title, url, description }) => {
-    await api('/items', {
+    const created = await api('/items', {
       method: 'POST',
       body: {
         title,
@@ -130,9 +156,8 @@ export function ResourcesPage() {
         parentId: currentFolder,
       },
     })
-    // Refetch after a short delay to pick up metadata
     fetchItems()
-    setTimeout(fetchItems, 3000)
+    if (created?.id) void refreshWhenMetadataArrives(created.id)
   }
 
   const handleEditItem = async (itemId, updates) => {
