@@ -18,24 +18,35 @@ export function CreateFolderDialog({ open, onClose, onSubmit }) {
   const [color, setColor] = useState(DEFAULT_FOLDER_COLOR)
   const [icon, setIcon] = useState(FOLDER_ICONS[0])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  // Don't show a stale error the next time the dialog opens.
+  const handleClose = () => {
+    setError('')
+    onClose()
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!name.trim()) return
     setLoading(true)
+    setError('')
     try {
       await onSubmit({ title: name.trim(), icon, color })
       setName('')
       setColor(DEFAULT_FOLDER_COLOR)
       setIcon(FOLDER_ICONS[0])
       onClose()
+    } catch (err) {
+      // Keep the dialog open with the input intact so the user can fix and retry.
+      setError(err.message || 'Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title="Create Folder">
+    <Dialog open={open} onClose={handleClose} title="Create Folder">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="mb-1.5 block text-sm font-medium">Folder Name</label>
@@ -85,8 +96,14 @@ export function CreateFolderDialog({ open, onClose, onSubmit }) {
           </div>
         </div>
 
+        {error && (
+          <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">
+            {error}
+          </p>
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={handleClose}>
             Cancel
           </Button>
           <Button type="submit" disabled={loading || !name.trim()}>

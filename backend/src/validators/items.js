@@ -7,7 +7,7 @@ const urlSchema = z.preprocess((value) => {
   const trimmed = value.trim()
   if (!trimmed) return undefined
   return /^[a-z][a-z\d+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
-}, z.string().url().max(2048).optional())
+}, z.string().url('Enter a valid web address, like example.com').max(2048).optional())
 
 const createItemSchema = z.object({
   // Optional for links: left blank, the page's own title is filled in once

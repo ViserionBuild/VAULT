@@ -16,9 +16,11 @@ import { EditItemDialog } from '../components/resources/edit-item-dialog'
 import { BulkActionBar } from '../components/resources/bulk-action-bar'
 import { MoveDialog } from '../components/resources/move-dialog'
 import { ContextMenu, useContextMenu } from '../components/ui/context-menu'
+import { useToast } from '../components/ui/toast'
 
 export function ResourcesPage() {
   const api = useApi()
+  const toast = useToast()
   const { activeWorkspace } = useWorkspace()
 
   const [items, setItems] = useState([])
@@ -28,6 +30,7 @@ export function ResourcesPage() {
   const [sortBy, setSortBy] = useState('position')
   const [sortOrder, setSortOrder] = useState('asc')
   const [loading, setLoading] = useState(false)
+  const [loadError, setLoadError] = useState(false)
 
   // Dialogs
   const [showCreateFolder, setShowCreateFolder] = useState(false)
@@ -45,6 +48,7 @@ export function ResourcesPage() {
   const fetchItems = useCallback(async () => {
     if (!activeWorkspace) return
     setLoading(true)
+    setLoadError(false)
     try {
       const params = new URLSearchParams({
         workspaceId: activeWorkspace.id,
@@ -56,7 +60,8 @@ export function ResourcesPage() {
       setItems(data.items ?? [])
       setBreadcrumbs(data.breadcrumbs ?? [])
     } catch {
-      // ignore
+      // Shown as an error state; an empty list would wrongly read "No items yet".
+      setLoadError(true)
     } finally {
       setLoading(false)
     }
@@ -71,6 +76,16 @@ export function ResourcesPage() {
   }, [view])
 
   // ─── Actions ───────────────────────────────────────────────────
+  // One-click actions report failure in a toast instead of failing silently.
+  // (Dialog actions throw instead, so the dialog can show the error inline.)
+  const attempt = async (action, failMessage) => {
+    try {
+      await action()
+    } catch (error) {
+      toast.error(error.status === 400 && error.message ? error.message : failMessage)
+    }
+  }
+
   const handleOpen = (item) => {
     if (item.type === 'folder') {
       setCurrentFolder(item.id)
@@ -123,20 +138,24 @@ export function ResourcesPage() {
     fetchItems()
   }
 
-  const handleDelete = async (itemId) => {
-    await api(`/items/${itemId}`, { method: 'DELETE' })
-    fetchItems()
-  }
+  const handleDelete = (itemId) =>
+    attempt(async () => {
+      await api(`/items/${itemId}`, { method: 'DELETE' })
+      fetchItems()
+    }, 'Could not delete. Please try again.')
 
-  const handleFavorite = async (itemId) => {
-    await api(`/items/${itemId}/favorite`, { method: 'POST' })
-    fetchItems()
-  }
+  const handleFavorite = (itemId) =>
+    attempt(async () => {
+      await api(`/items/${itemId}/favorite`, { method: 'POST' })
+      fetchItems()
+    }, 'Could not update favorite. Please try again.')
 
-  const handleRefreshMeta = async (itemId) => {
-    await api(`/items/${itemId}/metadata`, { method: 'POST' })
-    fetchItems()
-  }
+  const handleRefreshMeta = (itemId) =>
+    attempt(async () => {
+      await api(`/items/${itemId}/metadata`, { method: 'POST' })
+      fetchItems()
+      toast.success('Link details refreshed')
+    }, 'Could not refresh link details. Please try again.')
 
   const handleSelect = (itemId) => {
     setSelectedIds((prev) =>
@@ -144,11 +163,12 @@ export function ResourcesPage() {
     )
   }
 
-  const handleBulkDelete = async () => {
-    await api('/items/bulk', { method: 'POST', body: { action: 'delete', itemIds: selectedIds } })
-    setSelectedIds([])
-    fetchItems()
-  }
+  const handleBulkDelete = () =>
+    attempt(async () => {
+      await api('/items/bulk', { method: 'POST', body: { action: 'delete', itemIds: selectedIds } })
+      setSelectedIds([])
+      fetchItems()
+    }, 'Could not delete the selected items. Please try again.')
 
   const handleBulkMove = async (targetParentId) => {
     await api('/items/bulk', {
@@ -299,8 +319,21 @@ export function ResourcesPage() {
         </div>
       )}
 
+      {/* Load failure */}
+      {!loading && loadError && (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <h3 className="text-lg font-semibold">Couldn't load your resources</h3>
+          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+            Check your connection and try again.
+          </p>
+          <Button className="mt-4" variant="outline" onClick={fetchItems}>
+            <RefreshCw className="mr-1.5 h-4 w-4" /> Retry
+          </Button>
+        </div>
+      )}
+
       {/* Empty state */}
-      {!loading && items.length === 0 && (
+      {!loading && !loadError && items.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="mb-4 rounded-2xl bg-muted/50 p-6">
             {currentFolder ? (

@@ -17,6 +17,13 @@ export function EditItemDialog({ open, onClose, item, onSubmit }) {
   const [icon, setIcon] = useState('')
   const [color, setColor] = useState(FOLDER_COLORS[0])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  // Don't show a stale error the next time the dialog opens.
+  const handleClose = () => {
+    setError('')
+    onClose()
+  }
 
   useEffect(() => {
     if (item) {
@@ -32,6 +39,7 @@ export function EditItemDialog({ open, onClose, item, onSubmit }) {
     e.preventDefault()
     if (!title.trim()) return
     setLoading(true)
+    setError('')
     try {
       const updates = { title: title.trim(), description: description.trim() }
       if (item?.type === 'url') {
@@ -44,6 +52,9 @@ export function EditItemDialog({ open, onClose, item, onSubmit }) {
       }
       await onSubmit(item.id, updates)
       onClose()
+    } catch (err) {
+      // Keep the dialog open with the input intact so the user can fix and retry.
+      setError(err.message || 'Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }
@@ -52,7 +63,7 @@ export function EditItemDialog({ open, onClose, item, onSubmit }) {
   if (!item) return null
 
   return (
-    <Dialog open={open} onClose={onClose} title={`Edit ${item.type === 'folder' ? 'Folder' : 'Resource'}`}>
+    <Dialog open={open} onClose={handleClose} title={`Edit ${item.type === 'folder' ? 'Folder' : 'Resource'}`}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="mb-1.5 block text-sm font-medium">Title</label>
@@ -135,8 +146,14 @@ export function EditItemDialog({ open, onClose, item, onSubmit }) {
           />
         </div>
 
+        {error && (
+          <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">
+            {error}
+          </p>
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={handleClose}>
             Cancel
           </Button>
           <Button type="submit" disabled={loading || !title.trim()}>

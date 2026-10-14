@@ -8,11 +8,19 @@ export function AddResourceDialog({ open, onClose, onSubmit }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  // Don't show a stale error the next time the dialog opens.
+  const handleClose = () => {
+    setError('')
+    onClose()
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!url.trim()) return
     setLoading(true)
+    setError('')
     try {
       await onSubmit({
         // Omitted when blank so the server fills in the page's own title.
@@ -24,13 +32,16 @@ export function AddResourceDialog({ open, onClose, onSubmit }) {
       setTitle('')
       setDescription('')
       onClose()
+    } catch (err) {
+      // Keep the dialog open with the input intact so the user can fix and retry.
+      setError(err.message || 'Something went wrong. Please try again.')
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <Dialog open={open} onClose={onClose} title="Add Resource">
+    <Dialog open={open} onClose={handleClose} title="Add Resource">
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="mb-1.5 block text-sm font-medium">URL *</label>
@@ -72,8 +83,14 @@ export function AddResourceDialog({ open, onClose, onSubmit }) {
           />
         </div>
 
+        {error && (
+          <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">
+            {error}
+          </p>
+        )}
+
         <div className="flex justify-end gap-2 pt-2">
-          <Button type="button" variant="ghost" onClick={onClose}>
+          <Button type="button" variant="ghost" onClick={handleClose}>
             Cancel
           </Button>
           <Button type="submit" disabled={loading || !url.trim()}>

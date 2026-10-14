@@ -197,7 +197,8 @@ function createItemsRouter({ store, authMiddleware, metadataService }) {
         return res.status(400).json(
           responseEnvelope(null, {
             code: 'VALIDATION_ERROR',
-            message: 'Invalid item payload',
+            // The first issue is specific ("Enter a valid web address…"); show it.
+            message: error.issues[0]?.message ?? 'Invalid item payload',
             details: error.issues,
           }),
         )
@@ -248,7 +249,8 @@ function createItemsRouter({ store, authMiddleware, metadataService }) {
         return res.status(400).json(
           responseEnvelope(null, {
             code: 'VALIDATION_ERROR',
-            message: 'Invalid update payload',
+            // The first issue is specific ("Enter a valid web address…"); show it.
+            message: error.issues[0]?.message ?? 'Invalid update payload',
             details: error.issues,
           }),
         )

@@ -7,6 +7,7 @@ import { ThemeProvider } from './contexts/theme-context'
 import { AuthProvider } from './contexts/auth-context'
 import { WorkspaceProvider } from './contexts/workspace-context'
 import { ProfileProvider } from './contexts/profile-context'
+import { ToastProvider } from './components/ui/toast'
 import './index.css'
 
 const queryClient = new QueryClient()
@@ -18,9 +19,11 @@ createRoot(document.getElementById('root')).render(
         <AuthProvider>
           <WorkspaceProvider>
             <ProfileProvider>
+            <ToastProvider>
             <BrowserRouter>
               <App />
             </BrowserRouter>
+            </ToastProvider>
             </ProfileProvider>
           </WorkspaceProvider>
         </AuthProvider>
