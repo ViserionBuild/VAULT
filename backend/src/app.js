@@ -54,7 +54,8 @@ function createApp(options = {}) {
   app.use(express.json({ limit: '1mb' }))
   app.use(cookieParser())
 
-  const authLimiter = createAuthLimiter()
+  // Overridable so tests can exercise per-account limits past the IP limit.
+  const authLimiter = options.authLimiter ?? createAuthLimiter()
   const protectedLimiter = createProtectedLimiter()
 
   const authService = createAuthService({

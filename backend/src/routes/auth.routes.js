@@ -10,6 +10,14 @@ const {
 } = require('../services/auth-service')
 const { describeDevice, clientIp } = require('../utils/device')
 const { responseEnvelope } = require('../utils/response')
+const { invalidateSession } = require('../middleware/auth')
+const { createLoginThrottle } = require('../middleware/login-throttle')
+
+// Compared against when the email has no account, so a miss costs the same
+// bcrypt time as a wrong password and response timing doesn't reveal which
+// emails are registered. Same cost factor as real hashes.
+let dummyHashPromise = null
+const dummyHash = () => (dummyHashPromise ??= bcrypt.hash('not-a-real-password', 12))
 
 // Mirrors the hashing in the store so a session row can be matched to the
 // caller's own refresh cookie without ever storing the raw token.
@@ -23,6 +31,7 @@ function createAuthRouter({
   authMiddleware,
 }) {
   const router = express.Router()
+  const loginThrottle = createLoginThrottle()
 
   // Public: the client needs these before it has a session in order to size
   // its idle timer and warning countdown. No user data is exposed.
@@ -105,6 +114,8 @@ function createAuthRouter({
         sessionId: req.params.sessionId,
         userId,
       })
+      // Its access tokens stop working now, not when they expire.
+      invalidateSession(req.params.sessionId)
 
       if (!revoked) {
         return res.status(404).json(
@@ -142,14 +153,14 @@ function createAuthRouter({
         )
       }
 
-      const accessToken = authService.issueAccessToken(user)
       const refreshToken = authService.issueRefreshToken(user)
-      await store.storeRefreshToken({
+      const sessionId = await store.storeRefreshToken({
         userId: user.id,
         token: refreshToken,
         userAgent: req.headers['user-agent'],
         ipAddress: clientIp(req),
       })
+      const accessToken = authService.issueAccessToken(user, sessionId)
       // The frontend can't read this cookie cross-site, so the token is also
       // returned in the body for it to echo back in the x-csrf-token header.
       const csrfToken = authService.issueCsrfToken()
@@ -190,8 +201,28 @@ function createAuthRouter({
   router.post('/login', authLimiter, async (req, res) => {
     try {
       const payload = loginSchema.parse(req.body)
+
+      const lockedForMs = loginThrottle.lockedFor(payload.email)
+      if (lockedForMs > 0) {
+        const minutes = Math.ceil(lockedForMs / 60000)
+        res.set('Retry-After', String(Math.ceil(lockedForMs / 1000)))
+        return res.status(429).json(
+          responseEnvelope(null, {
+            code: 'ACCOUNT_LOCKED',
+            message: `Too many failed sign-in attempts. Try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`,
+          }),
+        )
+      }
+
       const user = await store.findUserByEmail(payload.email)
-      if (!user) {
+      // Always run one bcrypt comparison, even with no account, so timing
+      // is the same either way.
+      const validPassword = await bcrypt
+        .compare(payload.password, user?.passwordHash || (await dummyHash()))
+        .catch(() => false)
+
+      if (!user || !user.passwordHash || !validPassword) {
+        loginThrottle.recordFailure(payload.email)
         return res.status(401).json(
           responseEnvelope(null, {
             code: 'INVALID_CREDENTIALS',
@@ -199,25 +230,7 @@ function createAuthRouter({
           }),
         )
       }
-
-        if (!user.passwordHash) {
-          return res.status(401).json(
-            responseEnvelope(null, {
-              code: 'INVALID_CREDENTIALS',
-              message: 'Invalid email or password',
-            }),
-          )
-        }
-
-        const validPassword = await bcrypt.compare(payload.password, user.passwordHash).catch(() => false)
-      if (!validPassword) {
-        return res.status(401).json(
-          responseEnvelope(null, {
-            code: 'INVALID_CREDENTIALS',
-            message: 'Invalid email or password',
-          }),
-        )
-      }
+      loginThrottle.recordSuccess(payload.email)
 
       // Concurrent-session limit. Enforced only after the password check, so
       // this never reveals whether an account exists or is currently in use.
@@ -252,14 +265,14 @@ function createAuthRouter({
         }
       }
 
-      const accessToken = authService.issueAccessToken(user)
       const refreshToken = authService.issueRefreshToken(user)
-      await store.storeRefreshToken({
+      const sessionId = await store.storeRefreshToken({
         userId: user.id,
         token: refreshToken,
         userAgent: req.headers['user-agent'],
         ipAddress: clientIp(req),
       })
+      const accessToken = authService.issueAccessToken(user, sessionId)
       // The frontend can't read this cookie cross-site, so the token is also
       // returned in the body for it to echo back in the x-csrf-token header.
       const csrfToken = authService.issueCsrfToken()
@@ -342,19 +355,19 @@ function createAuthRouter({
         )
       }
 
-      const nextAccessToken = authService.issueAccessToken(user)
       const nextRefreshToken = authService.issueRefreshToken(user)
       // The frontend can't read this cookie cross-site, so the token is also
       // returned in the body for it to echo back in the x-csrf-token header.
       const csrfToken = authService.issueCsrfToken()
       authService.setCsrfCookie(res, csrfToken)
-      await store.rotateRefreshToken({
+      const sessionId = await store.rotateRefreshToken({
         userAgent: req.headers['user-agent'],
         ipAddress: clientIp(req),
         oldToken: currentRefreshToken,
         newToken: nextRefreshToken,
         userId: user.id,
       })
+      const nextAccessToken = authService.issueAccessToken(user, sessionId)
       authService.setRefreshCookie(res, nextRefreshToken)
 
       return res.json(
@@ -431,7 +444,8 @@ function createAuthRouter({
     const currentRefreshToken = authService.decryptCookieValue(req.cookies?.vault_refresh_token)
 
     if (currentRefreshToken) {
-      await store.revokeRefreshToken(currentRefreshToken)
+      // The session's access tokens stop working now, not when they expire.
+      invalidateSession(await store.revokeRefreshToken(currentRefreshToken))
     }
 
     authService.clearRefreshCookie(res)

@@ -29,6 +29,31 @@ function setCachedUser(userId, user) {
   }
 }
 
+// Access tokens carry their session id (sid). Checking the session on every
+// request is what makes logout and "end this session" take effect at once
+// rather than when the token expires. Results are cached briefly to avoid a
+// query per request; logout and session revocation clear the entry
+// immediately (invalidateSession), so the cache only delays revocations made
+// by other server instances.
+const SESSION_CACHE_TTL_MS = 10_000
+const sessionCache = new Map()
+
+async function isSessionLive(store, sessionId) {
+  const key = String(sessionId)
+  const cached = sessionCache.get(key)
+  if (cached && Date.now() < cached.expiresAt) return cached.live
+  const live = await store.isSessionActive(key)
+  sessionCache.set(key, { live, expiresAt: Date.now() + SESSION_CACHE_TTL_MS })
+  if (sessionCache.size > 5000) {
+    for (const [k, entry] of sessionCache) if (Date.now() > entry.expiresAt) sessionCache.delete(k)
+  }
+  return live
+}
+
+function invalidateSession(sessionId) {
+  if (sessionId) sessionCache.delete(String(sessionId))
+}
+
 // Exported so logout/delete paths can drop a user immediately if needed.
 function invalidateCachedUser(userId) {
   userCache.delete(String(userId))
@@ -58,6 +83,17 @@ function createAuthMiddleware({ store, jwtSecret }) {
           responseEnvelope(null, {
             code: 'UNAUTHORIZED',
             message: 'Invalid or expired access token',
+          }),
+        )
+      }
+
+      // Tokens issued before session ids existed have no sid; they simply run
+      // out (minutes) instead of being checked.
+      if (payload.sid && !(await isSessionLive(store, payload.sid))) {
+        return res.status(401).json(
+          responseEnvelope(null, {
+            code: 'SESSION_ENDED',
+            message: 'This session has ended',
           }),
         )
       }
@@ -93,4 +129,5 @@ function createAuthMiddleware({ store, jwtSecret }) {
 module.exports = {
   createAuthMiddleware,
   invalidateCachedUser,
+  invalidateSession,
 }
