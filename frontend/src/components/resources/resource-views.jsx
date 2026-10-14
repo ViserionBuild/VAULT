@@ -38,7 +38,14 @@ function IconLink({ item, className, children }) {
   )
 }
 
-export function ResourceCard({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect }) {
+// Drag-and-drop wiring from useItemDragDrop (optional): every item can be
+// dragged, and folders also accept drops.
+const dragProps = (dnd, item) =>
+  dnd ? { ...dnd.itemProps(item), ...(item.type === 'folder' ? dnd.dropProps(item.id) : {}) } : {}
+const dropHighlight = (dnd, item) =>
+  item.type === 'folder' && dnd?.isDropTarget(item.id) ? 'ring-2 ring-primary bg-primary/10' : ''
+
+export function ResourceCard({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect, dnd }) {
   const isFolder = item.type === 'folder'
   const folderColor = item.color || item.metadata?.color
 
@@ -52,6 +59,7 @@ export function ResourceCard({ item, onOpen, onContextMenu, onFavorite, isSelect
       onFavorite={onFavorite}
       isSelected={isSelected}
       onSelect={onSelect}
+      dnd={dnd}
     />
   ) : (
     <FileTile
@@ -61,6 +69,7 @@ export function ResourceCard({ item, onOpen, onContextMenu, onFavorite, isSelect
       onFavorite={onFavorite}
       isSelected={isSelected}
       onSelect={onSelect}
+      dnd={dnd}
     />
   )
 }
@@ -115,16 +124,17 @@ function TileControls({ item, onFavorite, onContextMenu, isSelected, onSelect, t
   )
 }
 
-function FolderTile({ item, color, onOpen, onContextMenu, onFavorite, isSelected, onSelect }) {
+function FolderTile({ item, color, onOpen, onContextMenu, onFavorite, isSelected, onSelect, dnd }) {
   // Windows Explorer icon view: glyph on top, name centered beneath it.
   return (
     <div
       className={`group relative flex cursor-pointer flex-col items-center gap-0.5 rounded border border-transparent px-1 pb-1 pt-1.5 transition-colors ${
         isSelected ? 'border-primary/40 bg-primary/10' : 'hover:bg-muted/60'
-      }`}
+      } ${dropHighlight(dnd, item)}`}
       onClick={() => onOpen(item)}
       onContextMenu={(e) => onContextMenu(e, item)}
       title={item.title}
+      {...dragProps(dnd, item)}
     >
       <TileControls
         item={item}
@@ -146,15 +156,16 @@ function FolderTile({ item, color, onOpen, onContextMenu, onFavorite, isSelected
   )
 }
 
-function FileTile({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect }) {
+function FileTile({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect, dnd }) {
   return (
     <div
       className={`group relative flex cursor-pointer flex-col items-center gap-0.5 rounded border border-transparent px-1 pb-1 pt-1.5 transition-colors ${
         isSelected ? 'border-primary/40 bg-primary/10' : 'hover:bg-muted/60'
-      }`}
+      } ${dropHighlight(dnd, item)}`}
       onClick={() => onOpen(item)}
       onContextMenu={(e) => onContextMenu(e, item)}
       title={item.title}
+      {...dragProps(dnd, item)}
     >
       <TileControls
         item={item}
@@ -251,7 +262,7 @@ export function ResourceListHeader({ onSort, sortBy, sortOrder, allSelected, som
   )
 }
 
-export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect }) {
+export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect, dnd }) {
   const isFolder = item.type === 'folder'
   const folderColor = item.color || item.metadata?.color
 
@@ -261,9 +272,10 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
     <div
       className={`group flex cursor-pointer items-center gap-3 border-b border-border/50 px-3 py-2 transition-colors last:border-b-0 ${
         isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'
-      }`}
+      } ${dropHighlight(dnd, item)}`}
       onClick={() => onOpen(item)}
       onContextMenu={(e) => onContextMenu(e, item)}
+      {...dragProps(dnd, item)}
     >
       <span className="flex w-4 shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
         <input
@@ -366,7 +378,7 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
   )
 }
 
-export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, selectedIds, onSelect, onSort, sortBy, sortOrder }) {
+export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, selectedIds, onSelect, onSort, sortBy, sortOrder, dnd }) {
   const columns = [
     { key: 'title', label: 'Name', sortable: true, className: 'min-w-[220px]' },
     { key: 'url', label: 'Location', sortable: false, className: 'hidden lg:table-cell w-56' },
@@ -429,9 +441,10 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                 key={item.id}
                 className={`group cursor-pointer border-b border-border/50 transition-colors last:border-b-0 ${
                   isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'
-                }`}
+                } ${dropHighlight(dnd, item)}`}
                 onClick={() => onOpen(item)}
                 onContextMenu={(e) => onContextMenu(e, item)}
+                {...dragProps(dnd, item)}
               >
                 <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                   <input

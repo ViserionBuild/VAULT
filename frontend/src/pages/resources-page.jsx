@@ -10,6 +10,7 @@ import { Button } from '../components/ui/button'
 import { Breadcrumbs } from '../components/resources/breadcrumbs'
 import { ViewToggle } from '../components/resources/view-toggle'
 import { SortMenu } from '../components/resources/sort-menu'
+import { isItemDrag, useItemDragDrop } from '../components/resources/use-item-drag-drop'
 import { ResourceCard, ResourceListItem, ResourceListHeader, ResourceTable } from '../components/resources/resource-views'
 import { ResourceSearch } from '../components/resources/resource-search'
 import { CreateFolderDialog } from '../components/resources/create-folder-dialog'
@@ -285,6 +286,57 @@ export function ResourcesPage() {
       toast.success('Link details refreshed')
     }, 'Could not refresh link details. Please try again.')
 
+  // Drag-and-drop move. Applied at once, with Undo moving everything back.
+  const moveByDrag = (itemIds, targetFolderId) =>
+    attempt(async () => {
+      const sourceFolderId = currentFolder
+      if (String(targetFolderId ?? '') === String(sourceFolderId ?? '')) return
+      removeLocally(itemIds)
+      setSelectedIds((prev) => prev.filter((id) => !itemIds.includes(id)))
+      await api('/items/bulk', {
+        method: 'POST',
+        body: { action: 'move', itemIds, targetParentId: targetFolderId },
+      })
+      const targetName = targetFolderId
+        ? (items.find((item) => item.id === targetFolderId) ?? breadcrumbs.find((c) => c.id === targetFolderId))?.title ?? 'folder'
+        : 'Resources'
+      toast.show({
+        message: `Moved ${itemIds.length === 1 ? '1 item' : `${itemIds.length} items`} to ${targetName}`,
+        action: {
+          label: 'Undo',
+          onClick: () =>
+            attempt(async () => {
+              await api('/items/bulk', {
+                method: 'POST',
+                body: { action: 'move', itemIds, targetParentId: sourceFolderId },
+              })
+              fetchItems()
+            }, 'Could not undo the move.'),
+        },
+      })
+    }, 'Could not move. Please try again.')
+
+  const dnd = useItemDragDrop({ selectedIds, onMove: moveByDrag })
+
+  // A link dragged in from another tab or app opens the add dialog with it.
+  const dropLinkProps = {
+    onDragOver: (event) => {
+      if (isItemDrag(event) || !event.dataTransfer.types.includes('text/uri-list')) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+    },
+    onDrop: (event) => {
+      if (isItemDrag(event)) return
+      const link = event.dataTransfer
+        .getData('text/uri-list')
+        .split(/\r?\n/)
+        .find((line) => line && !line.startsWith('#'))
+      if (!link || !parseWebUrl(link)) return
+      event.preventDefault()
+      openAddResource(link)
+    },
+  }
+
   const handleSelect = (itemId) => {
     setSelectedIds((prev) =>
       prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId],
@@ -407,13 +459,13 @@ export function ResourcesPage() {
 
   // ─── Render ────────────────────────────────────────────────────
   return (
-    <section className="space-y-4">
+    <section className="space-y-4" {...dropLinkProps}>
       {/* Header */}
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight">Resources</h1>
-            <Breadcrumbs breadcrumbs={breadcrumbs} onNavigate={handleNavigate} />
+            <Breadcrumbs breadcrumbs={breadcrumbs} onNavigate={handleNavigate} dnd={dnd} />
           </div>
 
           {/* Actions wrap rather than overflow on narrow screens */}
@@ -507,6 +559,7 @@ export function ResourcesPage() {
                     onFavorite={handleFavorite}
                     isSelected={selectedIds.includes(item.id)}
                     onSelect={handleSelect}
+                    dnd={dnd}
                   />
                 ))}
               </div>
@@ -533,6 +586,7 @@ export function ResourcesPage() {
                     onFavorite={handleFavorite}
                     isSelected={selectedIds.includes(item.id)}
                     onSelect={handleSelect}
+                    dnd={dnd}
                   />
                 ))}
               </div>
@@ -561,6 +615,7 @@ export function ResourcesPage() {
               onFavorite={handleFavorite}
               isSelected={selectedIds.includes(item.id)}
               onSelect={handleSelect}
+              dnd={dnd}
             />
           ))}
         </div>
@@ -579,6 +634,7 @@ export function ResourcesPage() {
           onSort={handleSort}
           sortBy={sortBy}
           sortOrder={sortOrder}
+          dnd={dnd}
         />
         </div>
       )}
