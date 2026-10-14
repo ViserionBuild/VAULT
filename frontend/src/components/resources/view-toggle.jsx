@@ -8,10 +8,11 @@ const views = [
   { key: 'table', icon: StretchHorizontal, label: 'Table' },
 ]
 
-export function ViewToggle({ activeView, onViewChange }) {
+// `views` limits which views are offered (keys from the list above).
+export function ViewToggle({ activeView, onViewChange, views: allowed }) {
   return (
     <div className="flex items-center gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5">
-      {views.map(({ key, icon: Icon, label }) => (
+      {views.filter((v) => !allowed || allowed.includes(v.key)).map(({ key, icon: Icon, label }) => (
         <Button
           key={key}
           variant={activeView === key ? 'default' : 'ghost'}

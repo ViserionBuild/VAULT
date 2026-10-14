@@ -1,6 +1,7 @@
 import {
   Folder, Star, MoreVertical, NotebookPen, ArrowUp, ArrowDown,
 } from 'lucide-react'
+import { dragProps, dropHighlight, focusRing, keyboardProps } from '../items/item-interactions'
 
 // ── shared helpers ────────────────────────────────────────────────
 export function stripHtml(html) {
@@ -90,15 +91,17 @@ function ItemControls({ item, onFavorite, onContextMenu, isSelected, onSelect, s
 }
 
 // ── Grid ──────────────────────────────────────────────────────────
-export function NoteCard({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect }) {
+export function NoteCard({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect, dnd }) {
   return (
     <div
       className={`group relative flex cursor-pointer flex-col items-center gap-0.5 rounded border border-transparent px-1 pb-1 pt-1.5 transition-colors ${
         isSelected ? 'border-primary/40 bg-primary/10' : 'hover:bg-muted/60'
-      }`}
+      } ${dropHighlight(dnd, item)} ${focusRing}`}
       onClick={() => onOpen(item)}
       onContextMenu={(e) => onContextMenu(e, item)}
       title={item.title}
+      {...dragProps(dnd, item)}
+      {...keyboardProps(item, onOpen, () => onSelect(item.id))}
     >
       <ItemControls
         item={item}
@@ -172,15 +175,17 @@ export function NoteListHeader({ onSort, sortBy, sortOrder, allSelected, someSel
   )
 }
 
-export function NoteListItem({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect }) {
+export function NoteListItem({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect, dnd }) {
   const preview = item.type === 'note' ? stripHtml(item.content) : item.description
   return (
     <div
       className={`group flex cursor-pointer items-center gap-3 border-b border-border/50 px-3 py-2 transition-colors last:border-b-0 ${
         isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'
-      }`}
+      } ${dropHighlight(dnd, item)} ${focusRing}`}
       onClick={() => onOpen(item)}
       onContextMenu={(e) => onContextMenu(e, item)}
+      {...dragProps(dnd, item)}
+      {...keyboardProps(item, onOpen, () => onSelect(item.id))}
     >
       <span className="flex w-4 shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
         <input
@@ -233,7 +238,7 @@ export function NoteListItem({ item, onOpen, onContextMenu, onFavorite, isSelect
 }
 
 // ── Table (detail) ────────────────────────────────────────────────
-export function NoteTable({ items, onOpen, onContextMenu, onFavorite, selectedIds, onSelect, onSort, sortBy, sortOrder }) {
+export function NoteTable({ items, onOpen, onContextMenu, onFavorite, selectedIds, onSelect, onSort, sortBy, sortOrder, dnd }) {
   const columns = [
     { key: 'title', label: 'Name', sortable: true, className: 'min-w-[200px]' },
     { key: 'preview', label: 'Preview', sortable: false, className: 'hidden lg:table-cell' },
@@ -286,9 +291,13 @@ export function NoteTable({ items, onOpen, onContextMenu, onFavorite, selectedId
                 key={item.id}
                 className={`group cursor-pointer border-b border-border/50 transition-colors last:border-b-0 ${
                   isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'
-                }`}
+                } ${dropHighlight(dnd, item)} ${focusRing}`}
                 onClick={() => onOpen(item)}
                 onContextMenu={(e) => onContextMenu(e, item)}
+                {...dragProps(dnd, item)}
+                {...keyboardProps(item, onOpen, () =>
+                  onSelect(isSelected ? selectedIds.filter((id) => id !== item.id) : [...selectedIds, item.id]),
+                )}
               >
                 <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                   <input

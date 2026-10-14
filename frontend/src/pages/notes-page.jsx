@@ -1,58 +1,94 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   FolderPlus, Plus, RefreshCw, Pencil, Trash2, Star,
-  FolderInput, BookMarked, NotebookPen
+  FolderInput, BookMarked, NotebookPen, CheckSquare,
 } from 'lucide-react'
 import { useApi } from '../hooks/use-api'
 import { useWorkspace } from '../contexts/workspace-context'
+import { useFolderParam } from '../hooks/use-folder-param'
+import { usePersistentSort } from '../hooks/use-persistent-sort'
+import { useItemShortcuts } from '../hooks/use-item-shortcuts'
 import { Button } from '../components/ui/button'
+import { useToast } from '../components/ui/toast'
 import { Breadcrumbs } from '../components/resources/breadcrumbs'
 import { ContextMenu, useContextMenu } from '../components/ui/context-menu'
 import { MoveDialog } from '../components/resources/move-dialog'
 import { ViewToggle } from '../components/resources/view-toggle'
 import { ResourceSearch } from '../components/resources/resource-search'
+import { BulkActionBar } from '../components/resources/bulk-action-bar'
+import { SortMenu } from '../components/items/sort-menu'
+import { useItemDragDrop } from '../components/items/use-item-drag-drop'
 import { NoteCard, NoteListHeader, NoteListItem, NoteTable } from '../components/notes/note-views'
 import { NoteEditorDialog } from '../components/notes/note-editor-dialog'
+import { FolderNameDialog } from '../components/notes/folder-name-dialog'
 import {
   createNote,
   deleteNote,
   favoriteNote,
+  fetchNote,
   fetchNotes,
   moveNote,
   searchNotes,
   updateNote,
 } from '../services/notes-services'
 
+// Notes has the Cards view's toggle slot but no preview images; keep the
+// three views it supports.
+const NOTE_VIEWS = ['grid', 'list', 'table']
+
 export function NotesPage() {
   const api = useApi()
+  const toast = useToast()
   const { activeWorkspace } = useWorkspace()
+  const { currentFolder, openFolder, searchParams, setSearchParams } = useFolderParam(activeWorkspace?.id)
 
   const [items, setItems] = useState([])
   const [breadcrumbs, setBreadcrumbs] = useState([])
-  const [currentFolder, setCurrentFolder] = useState(null)
-  const [sortBy, setSortBy] = useState('position')
-  const [sortOrder, setSortOrder] = useState('asc')
   const [loading, setLoading] = useState(false)
-  const [view, setView] = useState(() => localStorage.getItem('vault-notes-view') ?? 'grid')
+  const [loadError, setLoadError] = useState(false)
+  const [view, setView] = useState(() => {
+    const saved = localStorage.getItem('vault-notes-view')
+    return NOTE_VIEWS.includes(saved) ? saved : 'grid'
+  })
+  const { sortBy, sortOrder, changeSort, toggleColumn } = usePersistentSort('vault-notes-sort')
+
+  // Selection, cleared whenever the folder changes (including via Back).
   const [selectedIds, setSelectedIds] = useState([])
+  const [selectionFolder, setSelectionFolder] = useState(currentFolder)
+  if (selectionFolder !== currentFolder) {
+    setSelectionFolder(currentFolder)
+    setSelectedIds([])
+  }
 
-  // Dialogs
-  const [showCreateFolder, setShowCreateFolder] = useState(false)
-  const [folderTitle, setFolderTitle] = useState('')
-  // One piece of state drives the note editor: the note being edited, or a
-  // stub with isNew for a brand-new note.
+  // Dialogs. Folder dialogs remount per use (key) so they start fresh.
+  const [folderDialog, setFolderDialog] = useState(null) // { mode: 'create' } | { mode: 'rename', item }
+  const [folderDialogKey, setFolderDialogKey] = useState(0)
+  const openFolderDialog = (dialog) => {
+    setFolderDialogKey((k) => k + 1)
+    setFolderDialog(dialog)
+  }
+  // Items being moved: one from its menu, or the current selection.
+  const [moveIds, setMoveIds] = useState(null)
+
+  // The open note: the note being edited, or a stub with isNew for a new one.
+  // Its id is mirrored in the URL (?note=<id>) so refresh keeps it open and
+  // Back closes it.
   const [editorTarget, setEditorTarget] = useState(null)
-  const [editItem, setEditItem] = useState(null)
-  const [showMoveDialog, setShowMoveDialog] = useState(false)
-  const [moveItem, setMoveItem] = useState(null)
+  const noteParam = searchParams.get('note')
+  // Shown only while the URL names it (or it's new and unsaved), so Back,
+  // which drops ?note, closes the editor without any state change.
+  const showEditor = Boolean(editorTarget) && (editorTarget.isNew || editorTarget.id === noteParam)
 
-  // Context menu
   const { contextMenu, handleContextMenu, closeContextMenu } = useContextMenu()
 
   // ─── Fetch items ───────────────────────────────────────────────
+  // Only the latest request may update the list (fast folder clicks).
+  const fetchIdRef = useRef(0)
   const fetchItems = useCallback(async () => {
     if (!activeWorkspace) return
+    const fetchId = ++fetchIdRef.current
     setLoading(true)
+    setLoadError(false)
     try {
       const data = await fetchNotes(api, {
         workspaceId: activeWorkspace.id,
@@ -60,12 +96,14 @@ export function NotesPage() {
         sortOrder,
         parentId: currentFolder,
       })
+      if (fetchId !== fetchIdRef.current) return
       setItems(data.items ?? [])
       setBreadcrumbs(data.breadcrumbs ?? [])
     } catch {
-      // ignore
+      // Shown as an error state; an empty list would wrongly read "No notes yet".
+      if (fetchId === fetchIdRef.current) setLoadError(true)
     } finally {
-      setLoading(false)
+      if (fetchId === fetchIdRef.current) setLoading(false)
     }
   }, [api, activeWorkspace, currentFolder, sortBy, sortOrder])
 
@@ -75,15 +113,56 @@ export function NotesPage() {
     })
   }, [fetchItems])
 
-  const handleEditItem = useCallback(async (itemId, updates) => {
-    await updateNote(api, itemId, updates)
-    setEditItem(null)
-    fetchItems()
-  }, [api, fetchItems])
+  useEffect(() => {
+    localStorage.setItem('vault-notes-view', view)
+  }, [view])
 
-  // Note editing is in-React now; the iframe/postMessage bridge is gone.
-  // Autosave writes through these, so there is no explicit save step.
+  // ─── Open note <-> URL ─────────────────────────────────────────
+  const setNoteParam = useCallback(
+    (noteId, { replace = false } = {}) =>
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          if (noteId) next.set('note', noteId)
+          else next.delete('note')
+          return next
+        },
+        { replace },
+      ),
+    [setSearchParams],
+  )
+
+  const openNote = (item, { edit = false } = {}) => {
+    // Search results may come without the note body; then the URL effect
+    // below loads the full note instead of opening an empty editor.
+    if (item.content !== undefined) setEditorTarget({ ...item, startInEdit: edit })
+    setNoteParam(item.id)
+  }
   const openNewNote = () => setEditorTarget({ isNew: true, title: '', content: '' })
+  const closeEditor = () => {
+    setEditorTarget(null)
+    if (noteParam) setNoteParam(null)
+  }
+
+  // A refreshed or shared ?note= link loads that note.
+  useEffect(() => {
+    if (!noteParam || editorTarget?.id === noteParam) return
+    let cancelled = false
+    fetchNote(api, noteParam)
+      .then((note) => {
+        if (!cancelled && note) setEditorTarget(note)
+      })
+      .catch(() => {
+        if (cancelled) return
+        toast.error("That note couldn't be opened. It may have been deleted.")
+        setNoteParam(null, { replace: true })
+      })
+    return () => {
+      cancelled = true
+    }
+    // editorTarget is read, not tracked: only URL changes should drive this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noteParam, api])
 
   const handleSaveNote = useCallback(
     async ({ title, content }) => {
@@ -95,8 +174,9 @@ export function NotesPage() {
           workspaceId: activeWorkspace.id,
           parentId: currentFolder,
         })
-        // Adopt the new id so subsequent autosaves update rather than insert.
+        // Adopt the new id so later autosaves update rather than insert.
         setEditorTarget({ ...created, isNew: false })
+        setNoteParam(created.id, { replace: true })
         fetchItems()
         return created
       }
@@ -105,65 +185,112 @@ export function NotesPage() {
       fetchItems()
       return updated
     },
-    [api, activeWorkspace, currentFolder, editorTarget, fetchItems],
+    [api, activeWorkspace, currentFolder, editorTarget, fetchItems, setNoteParam],
   )
 
-
   // ─── Actions ───────────────────────────────────────────────────
-  const handleOpen = (item) => {
-    if (item.type === 'folder') {
-      setCurrentFolder(item.id)
-      setSelectedIds([])
-      return
+  // One-click actions update the list at once, then confirm with the server;
+  // failures show a toast and reload the true state.
+  const attempt = async (action, failMessage) => {
+    try {
+      await action()
+    } catch (error) {
+      toast.error(error.status === 400 && error.message ? error.message : failMessage)
+      fetchItems()
     }
-    // Notes open in the editor, which starts in reading mode.
-    setEditorTarget(item)
   }
 
-  const handleNavigate = (folderId) => {
-    setCurrentFolder(folderId)
+  const removeLocally = (ids) => setItems((prev) => prev.filter((item) => !ids.includes(item.id)))
+
+  const handleOpen = (item) => {
+    if (item.type === 'folder') openFolder(item.id)
+    else openNote(item)
   }
 
-  const handleCreateFolder = async () => {
-    if (!folderTitle.trim()) return
+  const handleCreateFolder = async (name) => {
     await createNote(api, {
-      title: folderTitle,
+      title: name,
       type: 'folder',
       workspaceId: activeWorkspace.id,
       parentId: currentFolder,
       description: '',
     })
-    setFolderTitle('')
-    setShowCreateFolder(false)
     fetchItems()
   }
 
-
-
-
-
-  const handleDelete = async (itemId) => {
-    await deleteNote(api, itemId)
+  const handleRenameFolder = async (item, name) => {
+    const updated = await updateNote(api, item.id, { title: name })
+    setItems((prev) => prev.map((entry) => (entry.id === item.id ? { ...entry, ...updated } : entry)))
     fetchItems()
   }
 
-  const handleFavorite = async (itemId) => {
-    await favoriteNote(api, itemId)
+  // Deleting moves notes to Trash; offer an immediate way back.
+  const offerUndo = (ids) => {
+    toast.show({
+      message: ids.length === 1 ? 'Moved to Trash' : `${ids.length} items moved to Trash`,
+      action: {
+        label: 'Undo',
+        onClick: () =>
+          attempt(async () => {
+            await Promise.all(ids.map((id) => api(`/notes/${id}/restore`, { method: 'POST' })))
+            fetchItems()
+          }, 'Could not restore. You can still restore from Trash.'),
+      },
+    })
+  }
+
+  const deleteItems = (ids) =>
+    attempt(async () => {
+      removeLocally(ids)
+      setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)))
+      await Promise.all(ids.map((id) => deleteNote(api, id)))
+      offerUndo(ids)
+    }, 'Could not delete. Please try again.')
+
+  const handleFavorite = (itemId) =>
+    attempt(async () => {
+      setItems((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, isFavorite: !item.isFavorite } : item)),
+      )
+      await favoriteNote(api, itemId)
+    }, 'Could not update favorite. Please try again.')
+
+  // Notes have no bulk endpoint; moves go one by one.
+  const moveItems = (ids, targetParentId) => Promise.all(ids.map((id) => moveNote(api, id, targetParentId)))
+
+  // From the Move dialog, which shows any error inline.
+  const handleMoveDialog = async (targetParentId) => {
+    await moveItems(moveIds, targetParentId)
+    if (String(targetParentId ?? '') !== String(currentFolder ?? '')) removeLocally(moveIds)
+    setSelectedIds((prev) => prev.filter((id) => !moveIds.includes(id)))
     fetchItems()
   }
 
-  const handleMove = async (targetParentId) => {
-    if (!moveItem) return
-    await moveNote(api, moveItem.id, targetParentId)
-    setMoveItem(null)
-    setShowMoveDialog(false)
-    fetchItems()
-  }
+  // Drag and drop: applied at once, with Undo moving everything back.
+  const moveByDrag = (ids, targetFolderId) =>
+    attempt(async () => {
+      const sourceFolderId = currentFolder
+      if (String(targetFolderId ?? '') === String(sourceFolderId ?? '')) return
+      removeLocally(ids)
+      setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)))
+      await moveItems(ids, targetFolderId)
+      const targetName = targetFolderId
+        ? (items.find((item) => item.id === targetFolderId) ?? breadcrumbs.find((c) => c.id === targetFolderId))?.title ?? 'folder'
+        : 'Notes'
+      toast.show({
+        message: `Moved ${ids.length === 1 ? '1 item' : `${ids.length} items`} to ${targetName}`,
+        action: {
+          label: 'Undo',
+          onClick: () =>
+            attempt(async () => {
+              await moveItems(ids, sourceFolderId)
+              fetchItems()
+            }, 'Could not undo the move.'),
+        },
+      })
+    }, 'Could not move. Please try again.')
 
-  // Persist the chosen view, matching the Resources tab.
-  useEffect(() => {
-    localStorage.setItem('vault-notes-view', view)
-  }, [view])
+  const dnd = useItemDragDrop({ selectedIds, onMove: moveByDrag })
 
   const handleSelect = (itemId) => {
     setSelectedIds((prev) =>
@@ -190,6 +317,15 @@ export function NotesPage() {
     )
   }
 
+  const anyDialogOpen = Boolean(folderDialog) || moveIds !== null
+  useItemShortcuts({
+    items,
+    selectedIds,
+    setSelectedIds,
+    onDeleteSelected: () => deleteItems(selectedIds),
+    disabled: anyDialogOpen || Boolean(contextMenu) || showEditor,
+  })
+
   // Workspace-wide note search.
   const handleSearch = useCallback(
     async (query) => {
@@ -200,23 +336,6 @@ export function NotesPage() {
     [api, activeWorkspace],
   )
 
-  const handleOpenSearchResult = (item) => {
-    if (item.type === 'folder') {
-      setCurrentFolder(item.id)
-      return
-    }
-    handleOpen(item)
-  }
-
-  const handleSort = (field) => {
-    if (sortBy === field) {
-      setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setSortBy(field)
-      setSortOrder('asc')
-    }
-  }
-
   // ─── Context Menu Items ────────────────────────────────────────
   const getContextMenuItems = (item) => [
     {
@@ -225,9 +344,18 @@ export function NotesPage() {
       onClick: () => handleOpen(item),
     },
     {
-      label: 'Edit',
+      // The only way to start selecting on touch screens, which can't hover to
+      // reveal the checkbox.
+      label: selectedIds.includes(item.id) ? 'Deselect' : 'Select',
+      icon: CheckSquare,
+      onClick: () => handleSelect(item.id),
+    },
+    {
+      // Folders are renamed; notes open straight into editing.
+      label: item.type === 'folder' ? 'Rename' : 'Edit',
       icon: Pencil,
-      onClick: () => setEditorTarget(item),
+      onClick: () =>
+        item.type === 'folder' ? openFolderDialog({ mode: 'rename', item }) : openNote(item, { edit: true }),
     },
     {
       label: item.isFavorite ? 'Remove Favorite' : 'Add Favorite',
@@ -237,16 +365,13 @@ export function NotesPage() {
     {
       label: 'Move to...',
       icon: FolderInput,
-      onClick: () => {
-        setMoveItem(item)
-        setShowMoveDialog(true)
-      },
+      onClick: () => setMoveIds([item.id]),
     },
     { separator: true },
     {
       label: 'Delete',
       icon: Trash2,
-      onClick: () => handleDelete(item.id),
+      onClick: () => deleteItems([item.id]),
       danger: true,
     },
   ]
@@ -254,15 +379,22 @@ export function NotesPage() {
   // ─── Render ────────────────────────────────────────────────────
   // The editor takes over the content column; the sidebar stays visible
   // because this renders inside the shell's <main>, not as a fixed overlay.
-  if (editorTarget) {
+  if (showEditor) {
     return (
       <NoteEditorDialog
         note={editorTarget}
-        mode={editorTarget.isNew ? 'edit' : 'read'}
-        onClose={() => setEditorTarget(null)}
+        mode={editorTarget.isNew || editorTarget.startInEdit ? 'edit' : 'read'}
+        onClose={closeEditor}
         onSave={handleSaveNote}
       />
     )
+  }
+
+  const sharedItemProps = {
+    onOpen: handleOpen,
+    onContextMenu: handleContextMenu,
+    onFavorite: handleFavorite,
+    dnd,
   }
 
   return (
@@ -272,14 +404,13 @@ export function NotesPage() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight">Notes</h1>
-            <Breadcrumbs breadcrumbs={breadcrumbs} onNavigate={handleNavigate} />
+            <Breadcrumbs breadcrumbs={breadcrumbs} onNavigate={openFolder} dnd={dnd} />
           </div>
 
-          {/* The sort dropdown is gone: list and table headers sort by column,
-              matching the Resources tab. */}
           <div className="flex flex-wrap items-center gap-2">
-            <ViewToggle activeView={view} onViewChange={setView} />
-            <Button size="sm" variant="outline" onClick={() => setShowCreateFolder(true)}>
+            <ViewToggle activeView={view} onViewChange={setView} views={NOTE_VIEWS} />
+            <SortMenu sortBy={sortBy} sortOrder={sortOrder} onChange={changeSort} />
+            <Button size="sm" variant="outline" onClick={() => openFolderDialog({ mode: 'create' })}>
               <FolderPlus className="mr-1.5 h-4 w-4" />
               <span className="hidden xs:inline">Folder</span>
               <span className="xs:hidden">New</span>
@@ -294,20 +425,31 @@ export function NotesPage() {
 
         <ResourceSearch
           onSearch={handleSearch}
-          onOpenResult={handleOpenSearchResult}
+          onOpenResult={handleOpen}
           placeholder="Search in Notes"
         />
       </div>
 
-      {/* Loading */}
-      {loading && items.length === 0 && (
+      {/* Loading (first load only; refreshes keep the list on screen) */}
+      {loading && items.length === 0 && !loadError && (
         <div className="flex items-center justify-center py-20">
           <RefreshCw className="h-6 w-6 animate-spin text-primary" />
         </div>
       )}
 
+      {/* Load failure */}
+      {!loading && loadError && (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <h3 className="text-lg font-semibold">Couldn't load your notes</h3>
+          <p className="mt-1 max-w-sm text-sm text-muted-foreground">Check your connection and try again.</p>
+          <Button className="mt-4" variant="outline" onClick={fetchItems}>
+            <RefreshCw className="mr-1.5 h-4 w-4" /> Retry
+          </Button>
+        </div>
+      )}
+
       {/* Empty state */}
-      {!loading && items.length === 0 && (
+      {!loading && !loadError && items.length === 0 && (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="mb-4 rounded-2xl bg-muted/50 p-6">
             <NotebookPen className="h-12 w-12 text-muted-foreground/40" />
@@ -321,7 +463,7 @@ export function NotesPage() {
               : 'Create a folder to organize your notes, or start with a note.'}
           </p>
           <div className="mt-4 flex gap-2">
-            <Button variant="outline" onClick={() => setShowCreateFolder(true)}>
+            <Button variant="outline" onClick={() => openFolderDialog({ mode: 'create' })}>
               <FolderPlus className="mr-1.5 h-4 w-4" /> New Folder
             </Button>
             <Button onClick={openNewNote}>
@@ -333,157 +475,104 @@ export function NotesPage() {
 
       {/* Touch screens show selection checkboxes only once something is selected. */}
       <div className="group/sel" data-selecting={selectedIds.length > 0}>
-      {/* Grid View */}
-      {!loading && view === 'grid' && items.length > 0 && (
-        <div className="space-y-6">
-          {gridFolders.length > 0 && (
-            <div>
-              <NoteSectionHeader
-                label="Folders"
-                items={gridFolders}
-                selectedIds={selectedIds}
-                onToggleGroup={handleToggleGroup}
-                addLabel="New folder"
-                onAdd={() => setShowCreateFolder(true)}
-              />
-              <div className="grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]">
-                {gridFolders.map((item) => (
-                  <NoteCard
-                    key={item.id}
-                    item={item}
-                    onOpen={handleOpen}
-                    onContextMenu={handleContextMenu}
-                    onFavorite={handleFavorite}
-                    isSelected={selectedIds.includes(item.id)}
-                    onSelect={handleSelect}
-                  />
-                ))}
+        {/* Grid View */}
+        {view === 'grid' && items.length > 0 && (
+          <div className="space-y-6">
+            {gridFolders.length > 0 && (
+              <div>
+                <NoteSectionHeader
+                  label="Folders"
+                  items={gridFolders}
+                  selectedIds={selectedIds}
+                  onToggleGroup={handleToggleGroup}
+                  addLabel="New folder"
+                  onAdd={() => openFolderDialog({ mode: 'create' })}
+                />
+                <div className="grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]">
+                  {gridFolders.map((item) => (
+                    <NoteCard
+                      key={item.id}
+                      item={item}
+                      isSelected={selectedIds.includes(item.id)}
+                      onSelect={handleSelect}
+                      {...sharedItemProps}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {gridNotes.length > 0 && (
-            <div>
-              <NoteSectionHeader
-                label="Notes"
-                items={gridNotes}
-                selectedIds={selectedIds}
-                onToggleGroup={handleToggleGroup}
-                addLabel="New note"
-                onAdd={openNewNote}
-              />
-              <div className="grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]">
-                {gridNotes.map((item) => (
-                  <NoteCard
-                    key={item.id}
-                    item={item}
-                    onOpen={handleOpen}
-                    onContextMenu={handleContextMenu}
-                    onFavorite={handleFavorite}
-                    isSelected={selectedIds.includes(item.id)}
-                    onSelect={handleSelect}
-                  />
-                ))}
+            {gridNotes.length > 0 && (
+              <div>
+                <NoteSectionHeader
+                  label="Notes"
+                  items={gridNotes}
+                  selectedIds={selectedIds}
+                  onToggleGroup={handleToggleGroup}
+                  addLabel="New note"
+                  onAdd={openNewNote}
+                />
+                <div className="grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]">
+                  {gridNotes.map((item) => (
+                    <NoteCard
+                      key={item.id}
+                      item={item}
+                      isSelected={selectedIds.includes(item.id)}
+                      onSelect={handleSelect}
+                      {...sharedItemProps}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-      )}
+            )}
+          </div>
+        )}
 
-      {/* List View */}
-      {!loading && view === 'list' && items.length > 0 && (
-        <div className="rounded-lg border border-border">
-          <NoteListHeader
-            onSort={handleSort}
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            allSelected={allSelected}
-            someSelected={someSelected}
-            onToggleAll={handleToggleAll}
-          />
-          {items.map((item) => (
-            <NoteListItem
-              key={item.id}
-              item={item}
-              onOpen={handleOpen}
-              onContextMenu={handleContextMenu}
-              onFavorite={handleFavorite}
-              isSelected={selectedIds.includes(item.id)}
-              onSelect={handleSelect}
+        {/* List View */}
+        {view === 'list' && items.length > 0 && (
+          <div className="rounded-lg border border-border">
+            <NoteListHeader
+              onSort={toggleColumn}
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              allSelected={allSelected}
+              someSelected={someSelected}
+              onToggleAll={handleToggleAll}
             />
-          ))}
-        </div>
-      )}
+            {items.map((item) => (
+              <NoteListItem
+                key={item.id}
+                item={item}
+                isSelected={selectedIds.includes(item.id)}
+                onSelect={handleSelect}
+                {...sharedItemProps}
+              />
+            ))}
+          </div>
+        )}
 
-      {/* Table (detail) View */}
-      {!loading && view === 'table' && items.length > 0 && (
-        <div className="rounded-lg border border-border">
-          <NoteTable
-            items={items}
-            onOpen={handleOpen}
-            onContextMenu={handleContextMenu}
-            onFavorite={handleFavorite}
-            selectedIds={selectedIds}
-            onSelect={setSelectedIds}
-            onSort={handleSort}
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-          />
-        </div>
-      )}
+        {/* Table (detail) View */}
+        {view === 'table' && items.length > 0 && (
+          <div className="rounded-lg border border-border">
+            <NoteTable
+              items={items}
+              selectedIds={selectedIds}
+              onSelect={setSelectedIds}
+              onSort={toggleColumn}
+              sortBy={sortBy}
+              sortOrder={sortOrder}
+              {...sharedItemProps}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Folder rename only - notes are edited in NoteEditorDialog */}
-      {editItem && editItem.type === 'folder' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="w-full max-w-md rounded-lg border border-border bg-background p-5">
-            <h2 className="mb-4 text-lg font-semibold">Rename folder</h2>
-            <input
-              type="text"
-              value={editItem.title}
-              onChange={(e) => setEditItem({ ...editItem, title: e.target.value })}
-              className="w-full rounded border border-border bg-background px-3 py-2 text-sm"
-              autoFocus
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setEditItem(null)}>Cancel</Button>
-              <Button
-                onClick={async () => {
-                  await handleEditItem(editItem.id, { title: editItem.title })
-                  setEditItem(null)
-                }}
-              >
-                Save
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* View Note Dialog */}
-
-      {/* Create Folder Dialog */}
-      {showCreateFolder && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background rounded-lg border border-input p-6 max-w-md w-full mx-4">
-            <h2 className="text-lg font-semibold mb-4">Create Folder</h2>
-            <input
-              type="text"
-              placeholder="Folder name..."
-              value={folderTitle}
-              onChange={(e) => setFolderTitle(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreateFolder()}
-              autoFocus
-              className="w-full px-3 py-2 rounded border border-input bg-background text-sm mb-4"
-            />
-            <div className="flex gap-2 justify-end">
-              <Button variant="outline" onClick={() => setShowCreateFolder(false)}>Cancel</Button>
-              <Button onClick={handleCreateFolder}>Create</Button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      <BulkActionBar
+        count={selectedIds.length}
+        onDelete={() => deleteItems(selectedIds)}
+        onMove={() => setMoveIds(selectedIds)}
+        onClear={() => setSelectedIds([])}
+      />
 
       {/* Context Menu */}
       {contextMenu && (
@@ -494,20 +583,28 @@ export function NotesPage() {
         />
       )}
 
-      {showMoveDialog && (
-        <MoveDialog
-          key={moveItem?.id ?? 'notes-move'}
-          open={showMoveDialog}
-          onClose={() => {
-            setShowMoveDialog(false)
-            setMoveItem(null)
-          }}
-          onSubmit={handleMove}
-          api={api}
-          workspaceId={activeWorkspace?.id}
-          basePath="/notes"
+      {folderDialog && (
+        <FolderNameDialog
+          key={folderDialogKey}
+          open
+          title={folderDialog.mode === 'create' ? 'Create Folder' : 'Rename Folder'}
+          submitLabel={folderDialog.mode === 'create' ? 'Create Folder' : 'Save'}
+          initialName={folderDialog.item?.title ?? ''}
+          onClose={() => setFolderDialog(null)}
+          onSubmit={(name) =>
+            folderDialog.mode === 'create' ? handleCreateFolder(name) : handleRenameFolder(folderDialog.item, name)
+          }
         />
       )}
+
+      <MoveDialog
+        open={moveIds !== null}
+        onClose={() => setMoveIds(null)}
+        onSubmit={handleMoveDialog}
+        api={api}
+        workspaceId={activeWorkspace?.id}
+        basePath="/notes"
+      />
     </section>
   )
 }
