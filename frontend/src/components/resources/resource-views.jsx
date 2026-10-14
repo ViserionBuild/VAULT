@@ -10,6 +10,7 @@ import {
 import defaultLinkIcon from '../../assets/default_link_icon.png'
 import { Badge } from '../ui/badge'
 import { FolderGlyph } from './folder-appearance'
+import { dragProps, dropHighlight, focusRing, keyboardProps } from '../items/item-interactions'
 
 // Stored URLs may lack a scheme; without one the browser treats them as
 // relative paths on this site.
@@ -38,31 +39,6 @@ function IconLink({ item, className, children }) {
     </a>
   )
 }
-
-// Drag-and-drop wiring from useItemDragDrop (optional): every item can be
-// dragged, and folders also accept drops.
-const dragProps = (dnd, item) =>
-  dnd ? { ...dnd.itemProps(item), ...(item.type === 'folder' ? dnd.dropProps(item.id) : {}) } : {}
-// Keyboard: every item is focusable; Enter opens it, Space toggles selection.
-// (Arrow keys, Ctrl/Cmd+A, Delete and Escape are handled by the page.)
-const keyboardProps = (item, onOpen, toggleSelect) => ({
-  tabIndex: 0,
-  'data-item-id': item.id,
-  onKeyDown: (event) => {
-    if (event.target !== event.currentTarget) return
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      onOpen(item)
-    } else if (event.key === ' ') {
-      event.preventDefault()
-      toggleSelect()
-    }
-  },
-})
-const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-primary'
-
-const dropHighlight = (dnd, item) =>
-  item.type === 'folder' && dnd?.isDropTarget(item.id) ? 'ring-2 ring-primary bg-primary/10' : ''
 
 export function ResourceCard({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect, dnd }) {
   const isFolder = item.type === 'folder'
