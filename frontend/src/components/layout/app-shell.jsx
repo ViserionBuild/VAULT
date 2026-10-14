@@ -11,7 +11,7 @@ import { useAuth } from '../../contexts/auth-context'
 import { useWorkspace } from '../../contexts/workspace-context'
 import { useProfile } from '../../contexts/profile-context'
 import { Avatar } from '../ui/avatar'
-import vaultIcon from '../../assets/vault-logo.webp'
+import vaultIcon from '../../assets/vault_icon_bw.svg'
 
 const navItems = [
   { label: 'Dashboard', path: '/', icon: Home },
@@ -69,7 +69,7 @@ export function AppShell() {
         <div className="flex h-14 items-center gap-2 border-b border-border px-4">
           {expanded && (
             <Link to="/" className="flex items-center gap-2 font-bold text-lg tracking-wider">
-              <img src={vaultIcon} alt="Vault" className="h-8 w-8 rounded-lg" />
+              <img src={vaultIcon} alt="Vault" className="h-8 w-8 rounded-full dark:ring-1 dark:ring-white/25" />
               <span>VAULT</span>
             </Link>
           )}
@@ -200,7 +200,7 @@ export function AppShell() {
             lives in the bottom tab bar instead. */}
         <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border bg-background/90 px-4 pt-[env(safe-area-inset-top)] backdrop-blur md:hidden">
           <Link to="/" className="flex items-center gap-2 font-bold tracking-wider">
-            <img src={vaultIcon} alt="" className="h-7 w-7 rounded-lg" />
+            <img src={vaultIcon} alt="" className="h-7 w-7 rounded-full dark:ring-1 dark:ring-white/25" />
             <span>VAULT</span>
           </Link>
           {activeWorkspace && (
