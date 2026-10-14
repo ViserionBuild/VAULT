@@ -39,6 +39,7 @@ function toApiDate(value) {
 
 export function TodoDetailsPage({
   currentTodo,
+  notFound,
   tasks,
   tasksLoading,
   onEditTodo,
@@ -92,6 +93,20 @@ export function TodoDetailsPage({
   const completed = groups.done.length
   const pct = total ? Math.round((completed / total) * 100) : 0
 
+  // A deleted list, or a stale or mistyped link.
+  if (notFound) {
+    return (
+      <section className="mx-auto max-w-3xl py-16 text-center">
+        <ListChecks className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
+        <h1 className="text-lg font-semibold">List not found</h1>
+        <p className="mt-1 text-sm text-muted-foreground">It may have been deleted.</p>
+        <Button className="mt-4" variant="outline" onClick={() => navigate('/todo')}>
+          <ChevronLeft className="mr-1 h-4 w-4" /> All lists
+        </Button>
+      </section>
+    )
+  }
+
   const rowProps = (task) => ({
     task,
     editing: activeEditor?.taskId === task.id,
@@ -125,8 +140,22 @@ export function TodoDetailsPage({
               {currentTodo?.description ? (
                 <p className="mt-1 text-sm text-muted-foreground">{currentTodo.description}</p>
               ) : null}
+              {(currentTodo?.priority > 0 || currentTodo?.targetDate) && (
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  {currentTodo.priority > 0 ? (
+                    <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${PRIORITY_STYLES[currentTodo.priority]}`}>
+                      {PRIORITY_LABELS[currentTodo.priority]}
+                    </span>
+                  ) : null}
+                  {currentTodo.targetDate ? (
+                    <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                      <CalendarDays className="h-3 w-3" /> Target {formatDate(currentTodo.targetDate)}
+                    </span>
+                  ) : null}
+                </div>
+              )}
             </div>
-            <Button size="sm" variant="outline" onClick={() => onEditTodo(currentTodo)}>
+            <Button size="sm" variant="outline" disabled={!currentTodo} onClick={() => onEditTodo(currentTodo)}>
               <Edit3 className="mr-1.5 h-4 w-4" /> Edit list
             </Button>
           </div>

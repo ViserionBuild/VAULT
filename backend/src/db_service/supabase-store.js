@@ -967,29 +967,73 @@ class SupabaseStore {
     return mapNoteRow(data)
   }
 
+  // Starred notes and note folders (folders live in their own table).
   async getFavoriteNotes(userId) {
-    const { data, error } = await this.client
-      .from('notes')
-      .select('*')
-      .eq('user_id', String(userId))
-      .eq('is_favorite', true)
-      .eq('is_deleted', false)
-      .order('updated_at', { ascending: false })
-
-    if (error) throw error
-    return (data ?? []).map(mapNoteRow)
+    const [folders, notes] = await Promise.all(
+      ['notes_folders', 'notes'].map((table) =>
+        this.client
+          .from(table)
+          .select('*')
+          .eq('user_id', String(userId))
+          .eq('is_favorite', true)
+          .eq('is_deleted', false),
+      ),
+    )
+    if (folders.error) throw folders.error
+    if (notes.error) throw notes.error
+    return [...(folders.data ?? []).map(mapNoteFolderRow), ...(notes.data ?? []).map(mapNoteRow)].sort(
+      (a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)),
+    )
   }
 
+  // Trashed notes and note folders, most recently deleted first.
   async getTrashNotes(userId) {
-    const { data, error } = await this.client
-      .from('notes')
-      .select('*')
-      .eq('user_id', String(userId))
-      .eq('is_deleted', true)
-      .order('deleted_at', { ascending: false })
+    const [folders, notes] = await Promise.all(
+      ['notes_folders', 'notes'].map((table) =>
+        this.client.from(table).select('*').eq('user_id', String(userId)).eq('is_deleted', true),
+      ),
+    )
+    if (folders.error) throw folders.error
+    if (notes.error) throw notes.error
+    return [...(folders.data ?? []).map(mapNoteFolderRow), ...(notes.data ?? []).map(mapNoteRow)].sort(
+      (a, b) => String(b.deletedAt).localeCompare(String(a.deletedAt)),
+    )
+  }
 
-    if (error) throw error
-    return (data ?? []).map(mapNoteRow)
+  // Dashboard numbers and recent activity for one workspace, across every
+  // folder (not just the top level).
+  async getWorkspaceOverview({ userId, workspaceId, recentLimit = 8 }) {
+    const scoped = (table, select = '*', head = false) =>
+      this.client
+        .from(table)
+        .select(select, head ? { count: 'exact', head: true } : undefined)
+        .eq('user_id', String(userId))
+        .eq('workspace_id', String(workspaceId))
+        .eq('is_deleted', false)
+
+    const results = await Promise.all([
+      scoped('folders', 'id', true),
+      scoped('files', 'id', true),
+      scoped('notes', 'id', true),
+      scoped('folders').order('updated_at', { ascending: false }).limit(recentLimit),
+      scoped('files').order('updated_at', { ascending: false }).limit(recentLimit),
+      scoped('notes').order('updated_at', { ascending: false }).limit(6),
+    ])
+    for (const result of results) if (result.error) throw result.error
+    const [folderCount, fileCount, noteCount, recentFolders, recentFiles, recentNotes] = results
+
+    const recentResources = [
+      ...(recentFolders.data ?? []).map(mapFolderRow),
+      ...(recentFiles.data ?? []).map(mapFileRow),
+    ]
+      .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
+      .slice(0, recentLimit)
+
+    return {
+      counts: { folders: folderCount.count ?? 0, links: fileCount.count ?? 0, notes: noteCount.count ?? 0 },
+      recentResources,
+      recentNotes: (recentNotes.data ?? []).map(mapNoteRow),
+    }
   }
 
   async getNotesBreadcrumbs(folderId, userId) {
@@ -1393,6 +1437,20 @@ class SupabaseStore {
 
     if (error) throw error
     return count ?? 0
+  }
+
+  // Undo for a list delete (lists are soft-deleted; tasks are untouched).
+  async restoreTodoList(listId, userId) {
+    const { data, error } = await this.client
+      .from('todo_lists')
+      .update({ is_deleted: false, deleted_at: null, updated_at: new Date().toISOString() })
+      .eq('id', String(listId))
+      .eq('user_id', String(userId))
+      .eq('is_deleted', true)
+      .select('*')
+
+    if (error) throw error
+    return data?.[0] ? mapTodoListRow(data[0]) : null
   }
 
   async createTodoTask({ listId, userId, title, description, completed, priority, dueDate }) {

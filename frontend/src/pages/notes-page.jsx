@@ -144,6 +144,24 @@ export function NotesPage() {
     if (noteParam) setNoteParam(null)
   }
 
+  // ?new=note (from the dashboard) opens a blank note, then drops the param.
+  const newIntent = searchParams.get('new')
+  useEffect(() => {
+    if (newIntent !== 'note') return
+    queueMicrotask(() => {
+      openNewNote()
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          next.delete('new')
+          return next
+        },
+        { replace: true },
+      )
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newIntent])
+
   // A refreshed or shared ?note= link loads that note.
   useEffect(() => {
     if (!noteParam || editorTarget?.id === noteParam) return

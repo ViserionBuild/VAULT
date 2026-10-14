@@ -11,7 +11,7 @@ const SORT_OPTIONS = [
  * Sort control for every view (the list and table headers sort too, but the
  * grid has no headers). A native select, so phones show their own picker.
  */
-export function SortMenu({ sortBy, sortOrder, onChange }) {
+export function SortMenu({ sortBy, sortOrder, onChange, options = SORT_OPTIONS }) {
   const ascending = sortOrder === 'asc'
   const DirectionIcon = ascending ? ArrowUpNarrowWide : ArrowDownNarrowWide
 
@@ -23,7 +23,7 @@ export function SortMenu({ sortBy, sortOrder, onChange }) {
         aria-label="Sort by"
         className="h-full cursor-pointer rounded-l-lg bg-transparent pl-2.5 pr-1 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary"
       >
-        {SORT_OPTIONS.map((option) => (
+        {options.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>

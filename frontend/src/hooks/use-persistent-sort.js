@@ -3,7 +3,7 @@ import { useState } from 'react'
 const DEFAULT_SORT = { sortBy: 'position', sortOrder: 'asc' }
 
 /** Sort field and direction, remembered in localStorage under `storageKey`. */
-export function usePersistentSort(storageKey) {
+export function usePersistentSort(storageKey, defaultSort = DEFAULT_SORT) {
   const [sort, setSort] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey))
@@ -11,7 +11,7 @@ export function usePersistentSort(storageKey) {
     } catch {
       // Fall through to the default.
     }
-    return DEFAULT_SORT
+    return defaultSort
   })
 
   const changeSort = (sortBy, sortOrder) => {

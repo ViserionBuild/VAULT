@@ -45,7 +45,7 @@ function createTodosRouter({ store, authMiddleware }) {
         return res.status(400).json(
           responseEnvelope(null, {
             code: 'VALIDATION_ERROR',
-            message: 'Invalid todo list payload',
+            message: error.issues[0]?.message ?? 'Invalid todo list payload',
             details: error.issues,
           }),
         )
@@ -71,7 +71,7 @@ function createTodosRouter({ store, authMiddleware }) {
         return res.status(400).json(
           responseEnvelope(null, {
             code: 'VALIDATION_ERROR',
-            message: 'Invalid todo list payload',
+            message: error.issues[0]?.message ?? 'Invalid todo list payload',
             details: error.issues,
           }),
         )
@@ -94,6 +94,22 @@ function createTodosRouter({ store, authMiddleware }) {
     } catch {
       return res.status(500).json(
         responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Failed to delete todo list' }),
+      )
+    }
+  })
+
+  router.post('/lists/:id/restore', authMiddleware, async (req, res) => {
+    try {
+      const list = await store.restoreTodoList(req.params.id, req.user.id)
+      if (!list) {
+        return res.status(404).json(
+          responseEnvelope(null, { code: 'NOT_FOUND', message: 'Todo list not found or not deleted' }),
+        )
+      }
+      return res.json(responseEnvelope(list))
+    } catch {
+      return res.status(500).json(
+        responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Failed to restore todo list' }),
       )
     }
   })
@@ -137,7 +153,7 @@ function createTodosRouter({ store, authMiddleware }) {
         return res.status(400).json(
           responseEnvelope(null, {
             code: 'VALIDATION_ERROR',
-            message: 'Invalid todo task payload',
+            message: error.issues[0]?.message ?? 'Invalid todo task payload',
             details: error.issues,
           }),
         )
@@ -163,7 +179,7 @@ function createTodosRouter({ store, authMiddleware }) {
         return res.status(400).json(
           responseEnvelope(null, {
             code: 'VALIDATION_ERROR',
-            message: 'Invalid todo task payload',
+            message: error.issues[0]?.message ?? 'Invalid todo task payload',
             details: error.issues,
           }),
         )

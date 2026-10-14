@@ -5,6 +5,8 @@ import { Dialog } from '../components/ui/dialog'
 import { Input } from '../components/ui/input'
 import { PriorityRating } from '../components/ui/priority-rating'
 import { Button } from '../components/ui/button'
+import { useToast } from '../components/ui/toast'
+import { usePersistentSort } from '../hooks/use-persistent-sort'
 import {
   createTodoList,
   createTodoTask,
@@ -12,6 +14,7 @@ import {
   deleteTodoTask,
   fetchTodoLists,
   fetchTodoTasks,
+  restoreTodoList,
   updateTodoList,
   updateTodoTask,
 } from '../services/todo-services'
@@ -93,15 +96,26 @@ function TodoDialog({ open, onClose, onSubmit, initialTodo }) {
     initialTodo ? toDateInputValue(initialTodo.targetDate) : todayInputValue(),
   )
   const [showDetails, setShowDetails] = useState(Boolean(initialTodo?.description))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
 
-  const submit = () => {
-    if (!title.trim()) return
-    onSubmit({
-      title: title.trim(),
-      description: description.trim(),
-      priority: Number(priority),
-      targetDate: toApiDate(targetDate),
-    })
+  const submit = async () => {
+    if (!title.trim() || saving) return
+    setSaving(true)
+    setError('')
+    try {
+      await onSubmit({
+        title: title.trim(),
+        description: description.trim(),
+        priority: Number(priority),
+        targetDate: toApiDate(targetDate),
+      })
+    } catch (err) {
+      // Stay open with the input intact so the user can retry.
+      setError(err.message || 'Could not save the list. Please try again.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -191,10 +205,16 @@ function TodoDialog({ open, onClose, onSubmit, initialTodo }) {
           </button>
         )}
 
+        {error && (
+          <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">
+            {error}
+          </p>
+        )}
+
         <div className="flex justify-end gap-2 border-t border-border pt-3">
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={submit} disabled={!title.trim()}>
-            {isEdit ? 'Save' : 'Create list'}
+          <Button onClick={submit} disabled={!title.trim() || saving}>
+            {saving ? 'Saving…' : isEdit ? 'Save' : 'Create list'}
           </Button>
         </div>
       </div>
@@ -204,6 +224,7 @@ function TodoDialog({ open, onClose, onSubmit, initialTodo }) {
 
 export function TodoPage() {
   const api = useApi()
+  const toast = useToast()
   const navigate = useNavigate()
   const { listId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -211,6 +232,7 @@ export function TodoPage() {
   // State - Todos
   const [todos, setTodos] = useState([])
   const [loading, setLoading] = useState(false)
+  const [todosLoaded, setTodosLoaded] = useState(false)
 
   // State - Tasks
   const [tasks, setTasks] = useState([])
@@ -218,10 +240,27 @@ export function TodoPage() {
 
   // State - Filters and sorting
   const [search, setSearch] = useState('')
-  const [sortSpec, setSortSpec] = useState([
-    { key: 'updatedAt', order: 'desc' },
-  ])
-  const [activeTab, setActiveTab] = useState('pending')
+  // Sort and the Pending/Completed/All filter are remembered across visits.
+  const { sortBy, sortOrder, changeSort } = usePersistentSort('vault-todo-sort', {
+    sortBy: 'updatedAt',
+    sortOrder: 'desc',
+  })
+  const sortSpec = useMemo(() => [{ key: sortBy, order: sortOrder }], [sortBy, sortOrder])
+  const [activeTab, setActiveTabState] = useState(() => {
+    try {
+      return localStorage.getItem('vault-todo-tab') ?? 'pending'
+    } catch {
+      return 'pending'
+    }
+  })
+  const setActiveTab = (tab) => {
+    setActiveTabState(tab)
+    try {
+      localStorage.setItem('vault-todo-tab', tab)
+    } catch {
+      // Not persisted; still applies for this visit.
+    }
+  }
 
   // State - Selection and UI
   const [selectedIds, setSelectedIds] = useState([])
@@ -237,13 +276,15 @@ export function TodoPage() {
   const fetchTodos = useCallback(async () => {
     setLoading(true)
     try {
-      const primarySort = sortSpec[0] ?? { key: 'updatedAt', order: 'desc' }
-      const data = await fetchTodoLists(api, { sortBy: primarySort.key, sortOrder: primarySort.order })
+      const data = await fetchTodoLists(api, { sortBy, sortOrder })
       setTodos(data ?? [])
+    } catch {
+      toast.error("Couldn't load your lists. Please try again.")
     } finally {
       setLoading(false)
+      setTodosLoaded(true)
     }
-  }, [api, sortSpec])
+  }, [api, sortBy, sortOrder, toast])
 
   // Fetch tasks
   const fetchTasks = useCallback(async () => {
@@ -256,6 +297,8 @@ export function TodoPage() {
     try {
       const data = await fetchTodoTasks(api, listId)
       setTasks(data ?? [])
+    } catch {
+      setTasks([])
     } finally {
       setTasksLoading(false)
     }
@@ -282,29 +325,27 @@ export function TodoPage() {
     }
   }, [searchParams, setSearchParams])
 
-  // Sort handling
-  const applySort = (key, options = {}) => {
-    const { additive = false } = options
-    const defaultOrder = key === 'title' ? 'asc' : 'desc'
-
-    setSortSpec((current) => {
-      const existingIndex = current.findIndex((entry) => entry.key === key)
-      const next = additive ? [...current] : []
-
-      if (existingIndex >= 0) {
-        const target = additive ? next[existingIndex] : current[existingIndex]
-        const nextOrder = target.order === 'asc' ? 'desc' : 'asc'
-        const updated = { key, order: nextOrder }
-        if (additive) {
-          next[existingIndex] = updated
-          return next
-        }
-        return [updated]
-      }
-
-      return [...next, { key, order: defaultOrder }]
-    })
+  // One-click actions apply at once; failures show a toast and reload.
+  const attempt = async (action, failMessage) => {
+    try {
+      await action()
+    } catch (error) {
+      toast.error(error.status === 400 && error.message ? error.message : failMessage)
+      fetchTodos()
+      fetchTasks()
+    }
   }
+
+  // Keep a list card's counts in step with local task changes.
+  const adjustCounts = (todoId, { tasks: dTasks = 0, done: dDone = 0 }) =>
+    setTodos((prev) =>
+      prev.map((todo) => {
+        if (todo.id !== todoId) return todo
+        const taskCount = Math.max(0, (todo.taskCount ?? 0) + dTasks)
+        const completedTaskCount = Math.max(0, (todo.completedTaskCount ?? 0) + dDone)
+        return { ...todo, taskCount, completedTaskCount, completed: taskCount > 0 && completedTaskCount === taskCount }
+      }),
+    )
 
   // Todo actions
   const saveTodo = async (payload) => {
@@ -318,15 +359,27 @@ export function TodoPage() {
     await fetchTodos()
   }
 
-  const deleteTodos = async (ids) => {
-    await Promise.all(ids.map((id) => deleteTodoList(api, id)))
-    setSelectedIds([])
-    setOpenMenuId(null)
-    if (ids.includes(listId)) navigate('/todo')
-    await fetchTodos()
-  }
+  const deleteTodos = (ids) =>
+    attempt(async () => {
+      setTodos((prev) => prev.filter((todo) => !ids.includes(todo.id)))
+      setSelectedIds([])
+      setOpenMenuId(null)
+      if (ids.includes(listId)) navigate('/todo')
+      await Promise.all(ids.map((id) => deleteTodoList(api, id)))
+      toast.show({
+        message: ids.length === 1 ? 'List deleted' : `${ids.length} lists deleted`,
+        action: {
+          label: 'Undo',
+          onClick: () =>
+            attempt(async () => {
+              await Promise.all(ids.map((id) => restoreTodoList(api, id)))
+              fetchTodos()
+            }, 'Could not restore the list.'),
+        },
+      })
+    }, 'Could not delete. Please try again.')
 
-  const completeTodos = async (ids) => {
+  const completeTodos = (ids) => attempt(async () => {
     await Promise.all(ids.map(async (id) => {
       const todoTasks = await fetchTodoTasks(api, id)
       await Promise.all(
@@ -338,9 +391,10 @@ export function TodoPage() {
     setSelectedIds([])
     setOpenMenuId(null)
     await Promise.all([fetchTodos(), ids.includes(listId) ? fetchTasks() : Promise.resolve()])
-  }
+    toast.success(ids.length === 1 ? 'List completed' : `${ids.length} lists completed`)
+  }, 'Could not complete. Please try again.')
 
-  const duplicateTodo = async (todo) => {
+  const duplicateTodo = (todo) => attempt(async () => {
     const created = await createTodoList(api, {
       title: `${todo.title} copy`,
       description: todo.description ?? '',
@@ -358,25 +412,62 @@ export function TodoPage() {
     ))
     setOpenMenuId(null)
     await fetchTodos()
-  }
+    toast.success(`Duplicated “${todo.title}”`)
+  }, 'Could not duplicate the list.')
 
   // Task actions
+  // Quick-add keeps its text on failure (it only resets on success).
   const createTask = async (payload) => {
-    await createTodoTask(api, listId, payload)
-    await Promise.all([fetchTasks(), fetchTodos()])
+    try {
+      const created = await createTodoTask(api, listId, payload)
+      setTasks((prev) => [...prev, created])
+      adjustCounts(listId, { tasks: 1, done: created.completed ? 1 : 0 })
+    } catch (error) {
+      toast.error(error.message || 'Could not add the task.')
+      throw error
+    }
   }
 
-  const updateTask = async (taskId, updates) => {
-    await updateTodoTask(api, taskId, updates)
-    await Promise.all([fetchTasks(), fetchTodos()])
-  }
+  const updateTask = (taskId, updates) =>
+    attempt(async () => {
+      const before = tasks.find((task) => task.id === taskId)
+      setTasks((prev) => prev.map((task) => (task.id === taskId ? { ...task, ...updates } : task)))
+      if (before && 'completed' in updates && Boolean(updates.completed) !== Boolean(before.completed)) {
+        adjustCounts(listId, { done: updates.completed ? 1 : -1 })
+      }
+      await updateTodoTask(api, taskId, updates)
+    }, 'Could not update the task.')
 
-  const deleteTask = async (taskId) => {
-    await deleteTodoTask(api, taskId)
-    await Promise.all([fetchTasks(), fetchTodos()])
-  }
+  const deleteTask = (taskId) =>
+    attempt(async () => {
+      const task = tasks.find((t) => t.id === taskId)
+      setTasks((prev) => prev.filter((t) => t.id !== taskId))
+      adjustCounts(listId, { tasks: -1, done: task?.completed ? -1 : 0 })
+      await deleteTodoTask(api, taskId)
+      if (!task) return
+      // Tasks are deleted outright, so Undo re-creates it with the same details.
+      const targetListId = listId
+      toast.show({
+        message: 'Task deleted',
+        action: {
+          label: 'Undo',
+          onClick: () =>
+            attempt(async () => {
+              await createTodoTask(api, targetListId, {
+                title: task.title,
+                description: task.description ?? '',
+                priority: task.priority ?? 0,
+                dueDate: normalizeDueDate(task.dueDate),
+                completed: Boolean(task.completed),
+              })
+              fetchTasks()
+              fetchTodos()
+            }, 'Could not restore the task.'),
+        },
+      })
+    }, 'Could not delete the task.')
 
-  const duplicateTask = async (task) => {
+  const duplicateTask = (task) => attempt(async () => {
     await createTodoTask(api, listId, {
       title: `${task.title} (Copy)`
         .replace(/\s+\(Copy\)$/, ' (Copy)')
@@ -387,7 +478,7 @@ export function TodoPage() {
       completed: false,
     })
     await Promise.all([fetchTasks(), fetchTodos()])
-  }
+  }, 'Could not duplicate the task.')
 
   const reorderTask = async (taskId, targetIndex) => {
     const currentIndex = tasks.findIndex((task) => task.id === taskId)
@@ -427,6 +518,7 @@ export function TodoPage() {
         <TodoDetailsPage
           listId={listId}
           currentTodo={currentTodo}
+          notFound={todosLoaded && !loading && !currentTodo}
           tasks={tasks}
           tasksLoading={tasksLoading}
           onEditTodo={(todo) => setTodoDialog({ mode: 'edit', todo })}
@@ -458,7 +550,9 @@ export function TodoPage() {
         search={search}
         onSearchChange={setSearch}
         sortSpec={sortSpec}
-        onSortChange={applySort}
+        sortBy={sortBy}
+        sortOrder={sortOrder}
+        onSortChange={changeSort}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         selectedIds={selectedIds}
