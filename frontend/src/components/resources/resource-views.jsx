@@ -42,7 +42,7 @@ function TileControls({ item, onFavorite, onContextMenu, isSelected, onSelect, t
     <>
       <div
         className={`absolute left-1 top-1 z-10 transition-opacity ${
-          isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 touch:invisible group-data-[selecting=true]/sel:visible group-data-[selecting=true]/sel:opacity-100'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
@@ -60,7 +60,7 @@ function TileControls({ item, onFavorite, onContextMenu, isSelected, onSelect, t
           className={`rounded-full p-1 transition-all ${
             item.isFavorite
               ? 'text-yellow-400'
-              : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-yellow-400'
+              : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-yellow-400 touch:hidden'
           } ${tone === 'onTint' ? 'hover:bg-background/60' : 'hover:bg-muted'}`}
           onClick={(e) => {
             e.stopPropagation()
@@ -71,7 +71,7 @@ function TileControls({ item, onFavorite, onContextMenu, isSelected, onSelect, t
           <Star className="h-2.5 w-2.5" fill={item.isFavorite ? 'currentColor' : 'none'} />
         </button>
         <button
-          className={`rounded-full p-1 text-muted-foreground opacity-0 transition-all group-hover:opacity-100 hover:text-foreground ${
+          className={`rounded-full p-1 touch:p-1.5 text-muted-foreground opacity-0 transition-all group-hover:opacity-100 touch:opacity-100 hover:text-foreground ${
             tone === 'onTint' ? 'hover:bg-background/60' : 'hover:bg-muted'
           }`}
           onClick={(e) => {
@@ -80,7 +80,7 @@ function TileControls({ item, onFavorite, onContextMenu, isSelected, onSelect, t
           }}
           aria-label="Open menu"
         >
-          <MoreVertical className="h-2.5 w-2.5" />
+          <MoreVertical className="h-2.5 w-2.5 touch:h-4 touch:w-4" />
         </button>
       </div>
     </>
@@ -255,7 +255,7 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
           checked={isSelected}
           onChange={() => onSelect(item.id)}
           className={`h-4 w-4 rounded border-border accent-primary cursor-pointer transition-opacity ${
-            isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 touch:invisible group-data-[selecting=true]/sel:visible group-data-[selecting=true]/sel:opacity-100'
           }`}
           aria-label={`Select ${item.title}`}
         />
@@ -331,7 +331,7 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
           className={`rounded-full p-1.5 transition-all ${
             item.isFavorite
               ? 'text-yellow-400'
-              : 'text-muted-foreground/40 opacity-0 hover:text-yellow-400 group-hover:opacity-100'
+              : 'text-muted-foreground/40 opacity-0 hover:text-yellow-400 group-hover:opacity-100 touch:hidden'
           } hover:bg-muted`}
           onClick={(e) => {
             e.stopPropagation()
@@ -342,7 +342,7 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
           <Star className="h-3.5 w-3.5" fill={item.isFavorite ? 'currentColor' : 'none'} />
         </button>
         <button
-          className="rounded-full p-1.5 text-muted-foreground/60 opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100"
+          className="rounded-full p-1.5 text-muted-foreground/60 opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100 touch:opacity-100"
           onClick={(e) => {
             e.stopPropagation()
             onContextMenu(e, item)
@@ -435,7 +435,7 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                       )
                     }}
                     className={`h-4 w-4 rounded border-border accent-primary cursor-pointer transition-opacity ${
-                      isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 touch:invisible group-data-[selecting=true]/sel:visible group-data-[selecting=true]/sel:opacity-100'
                     }`}
                     aria-label={`Select ${item.title}`}
                   />
@@ -502,7 +502,7 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                       className={`rounded-full p-1.5 transition-all ${
                         item.isFavorite
                           ? 'text-yellow-400'
-                          : 'text-muted-foreground/40 opacity-0 hover:text-yellow-400 group-hover:opacity-100'
+                          : 'text-muted-foreground/40 opacity-0 hover:text-yellow-400 group-hover:opacity-100 touch:hidden'
                       } hover:bg-muted`}
                       onClick={() => onFavorite(item.id)}
                       aria-label={item.isFavorite ? 'Remove favorite' : 'Add favorite'}
@@ -510,7 +510,7 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                       <Star className="h-3.5 w-3.5" fill={item.isFavorite ? 'currentColor' : 'none'} />
                     </button>
                     <button
-                      className="rounded-full p-1.5 text-muted-foreground/60 opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                      className="rounded-full p-1.5 text-muted-foreground/60 opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100 touch:opacity-100"
                       onClick={(e) => onContextMenu(e, item)}
                       aria-label="Open menu"
                     >

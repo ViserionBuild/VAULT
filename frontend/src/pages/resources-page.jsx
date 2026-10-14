@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   FolderPlus, Plus, ArrowUpDown, RefreshCw,
-  Pencil, Trash2, Star, FolderInput, ExternalLink, RotateCcw, Tag
+  Pencil, Trash2, Star, FolderInput, ExternalLink, RotateCcw, Tag, CheckSquare
 } from 'lucide-react'
 import { useApi } from '../hooks/use-api'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -219,6 +219,13 @@ export function ResourcesPage() {
       onClick: () => handleOpen(item),
     },
     {
+      // The only way to start selecting on touch screens, which can't hover to
+      // reveal the checkbox.
+      label: selectedIds.includes(item.id) ? 'Deselect' : 'Select',
+      icon: CheckSquare,
+      onClick: () => handleSelect(item.id),
+    },
+    {
       label: 'Edit',
       icon: Pencil,
       onClick: () => setEditItem(item),
@@ -321,6 +328,8 @@ export function ResourcesPage() {
         </div>
       )}
 
+      {/* Touch screens show selection checkboxes only once something is selected. */}
+      <div className="group/sel" data-selecting={selectedIds.length > 0}>
       {/* Grid View - folders and files in separate sections, like Drive */}
       {view === 'grid' && items.length > 0 && (
         <div className="space-y-6">
@@ -419,6 +428,7 @@ export function ResourcesPage() {
         />
         </div>
       )}
+      </div>
 
       {/* Bulk Action Bar */}
       <BulkActionBar

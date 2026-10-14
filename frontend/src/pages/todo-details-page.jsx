@@ -437,7 +437,7 @@ function TaskRow({
         )}
       </div>
 
-      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 touch:opacity-100">
         <button
           type="button"
           onClick={onDuplicate}

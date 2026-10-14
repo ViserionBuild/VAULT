@@ -53,7 +53,7 @@ function ItemControls({ item, onFavorite, onContextMenu, isSelected, onSelect, s
     <>
       <div
         className={`absolute left-1 top-1 z-10 transition-opacity ${
-          isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 touch:invisible group-data-[selecting=true]/sel:visible group-data-[selecting=true]/sel:opacity-100'
         }`}
         onClick={(e) => e.stopPropagation()}
       >
@@ -70,7 +70,7 @@ function ItemControls({ item, onFavorite, onContextMenu, isSelected, onSelect, s
           className={`rounded-full p-1 transition-all hover:bg-muted ${
             item.isFavorite
               ? 'text-yellow-400'
-              : 'text-muted-foreground opacity-0 hover:text-yellow-400 group-hover:opacity-100'
+              : 'text-muted-foreground opacity-0 hover:text-yellow-400 group-hover:opacity-100 touch:hidden'
           }`}
           onClick={(e) => { e.stopPropagation(); onFavorite(item.id) }}
           aria-label={item.isFavorite ? 'Remove favorite' : 'Add favorite'}
@@ -78,11 +78,11 @@ function ItemControls({ item, onFavorite, onContextMenu, isSelected, onSelect, s
           <Star className="h-2.5 w-2.5" fill={item.isFavorite ? 'currentColor' : 'none'} />
         </button>
         <button
-          className="rounded-full p-1 text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100"
+          className="rounded-full p-1 touch:p-1.5 text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100 touch:opacity-100"
           onClick={(e) => { e.stopPropagation(); onContextMenu(e, item) }}
           aria-label="Open menu"
         >
-          <MoreVertical className="h-2.5 w-2.5" />
+          <MoreVertical className="h-2.5 w-2.5 touch:h-4 touch:w-4" />
         </button>
       </div>
     </>
@@ -188,7 +188,7 @@ export function NoteListItem({ item, onOpen, onContextMenu, onFavorite, isSelect
           checked={isSelected}
           onChange={() => onSelect(item.id)}
           className={`h-4 w-4 cursor-pointer rounded border-border accent-primary transition-opacity ${
-            isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 touch:invisible group-data-[selecting=true]/sel:visible group-data-[selecting=true]/sel:opacity-100'
           }`}
           aria-label={`Select ${item.title}`}
         />
@@ -213,7 +213,7 @@ export function NoteListItem({ item, onOpen, onContextMenu, onFavorite, isSelect
           className={`rounded-full p-1.5 transition-all hover:bg-muted ${
             item.isFavorite
               ? 'text-yellow-400'
-              : 'text-muted-foreground/40 opacity-0 hover:text-yellow-400 group-hover:opacity-100'
+              : 'text-muted-foreground/40 opacity-0 hover:text-yellow-400 group-hover:opacity-100 touch:hidden'
           }`}
           onClick={(e) => { e.stopPropagation(); onFavorite(item.id) }}
           aria-label={item.isFavorite ? 'Remove favorite' : 'Add favorite'}
@@ -221,7 +221,7 @@ export function NoteListItem({ item, onOpen, onContextMenu, onFavorite, isSelect
           <Star className="h-3.5 w-3.5" fill={item.isFavorite ? 'currentColor' : 'none'} />
         </button>
         <button
-          className="rounded-full p-1.5 text-muted-foreground/60 opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100"
+          className="rounded-full p-1.5 text-muted-foreground/60 opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100 touch:opacity-100"
           onClick={(e) => { e.stopPropagation(); onContextMenu(e, item) }}
           aria-label="Open menu"
         >
@@ -298,7 +298,7 @@ export function NoteTable({ items, onOpen, onContextMenu, onFavorite, selectedId
                       isSelected ? selectedIds.filter((id) => id !== item.id) : [...selectedIds, item.id],
                     )}
                     className={`h-4 w-4 cursor-pointer rounded border-border accent-primary transition-opacity ${
-                      isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                      isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 touch:invisible group-data-[selecting=true]/sel:visible group-data-[selecting=true]/sel:opacity-100'
                     }`}
                     aria-label={`Select ${item.title}`}
                   />
@@ -326,7 +326,7 @@ export function NoteTable({ items, onOpen, onContextMenu, onFavorite, selectedId
                       className={`rounded-full p-1.5 transition-all hover:bg-muted ${
                         item.isFavorite
                           ? 'text-yellow-400'
-                          : 'text-muted-foreground/40 opacity-0 hover:text-yellow-400 group-hover:opacity-100'
+                          : 'text-muted-foreground/40 opacity-0 hover:text-yellow-400 group-hover:opacity-100 touch:hidden'
                       }`}
                       onClick={() => onFavorite(item.id)}
                       aria-label={item.isFavorite ? 'Remove favorite' : 'Add favorite'}
@@ -334,7 +334,7 @@ export function NoteTable({ items, onOpen, onContextMenu, onFavorite, selectedId
                       <Star className="h-3.5 w-3.5" fill={item.isFavorite ? 'currentColor' : 'none'} />
                     </button>
                     <button
-                      className="rounded-full p-1.5 text-muted-foreground/60 opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                      className="rounded-full p-1.5 text-muted-foreground/60 opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100 touch:opacity-100"
                       onClick={(e) => onContextMenu(e, item)}
                       aria-label="Open menu"
                     >

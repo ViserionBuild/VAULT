@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  CheckCheck, ClipboardList, Edit3, MoreVertical,
+  CheckCheck, CheckSquare, ClipboardList, Edit3, MoreVertical,
   Plus, RefreshCw, Search, Trash2, Copy
 } from 'lucide-react'
 import { Button } from '../components/ui/button'
@@ -224,7 +224,11 @@ export function TodoListPage({
 
       {/* ── List cards ──────────────────────────────────────────── */}
       {visibleTodos.length > 0 && (
-        <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
+        <div
+          className="group/sel grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]"
+          // Touch screens show selection checkboxes only once something is selected.
+          data-selecting={selectedIds.length > 0}
+        >
           {visibleTodos.map((todo) => (
             <TodoListCard
               key={todo.id}
@@ -240,6 +244,14 @@ export function TodoListPage({
                     : [...selectedIds, todo.id],
                 )
               }
+              onSelectFromMenu={() => {
+                onSelectedIdsChange(
+                  selectedIds.includes(todo.id)
+                    ? selectedIds.filter((id) => id !== todo.id)
+                    : [...selectedIds, todo.id],
+                )
+                onOpenMenuChange(null)
+              }}
               onEdit={() => onEditTodo(todo)}
               onDuplicate={() => onDuplicateTodo(todo)}
               onComplete={() => onCompleteTodos([todo.id])}
@@ -301,7 +313,7 @@ function ProgressRing({ percent, size = 52 }) {
 }
 
 function TodoListCard({
-  todo, isSelected, menuOpen, onToggleMenu, onOpen, onToggleSelect,
+  todo, isSelected, menuOpen, onToggleMenu, onOpen, onToggleSelect, onSelectFromMenu,
   onEdit, onDuplicate, onComplete, onDelete,
 }) {
   const total = todo.taskCount ?? 0
@@ -325,7 +337,7 @@ function TodoListCard({
           onClick={(e) => e.stopPropagation()}
           aria-label={`Select ${todo.title}`}
           className={`mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-border accent-primary transition-opacity ${
-            isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+            isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 touch:invisible group-data-[selecting=true]/sel:visible group-data-[selecting=true]/sel:opacity-100'
           }`}
         />
 
@@ -343,12 +355,14 @@ function TodoListCard({
             type="button"
             onClick={onToggleMenu}
             aria-label="List actions"
-            className="rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100"
+            className="rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100 touch:opacity-100"
           >
             <MoreVertical className="h-4 w-4" />
           </button>
           {menuOpen && (
             <div className="absolute right-0 top-full z-30 mt-1 w-40 rounded-lg border border-border bg-background p-1 shadow-xl">
+              {/* The only way to start selecting on touch screens, which can't hover to reveal the checkbox. */}
+              <MenuItem icon={CheckSquare} label={isSelected ? 'Deselect' : 'Select'} onClick={onSelectFromMenu} />
               <MenuItem icon={Edit3} label="Edit" onClick={onEdit} />
               <MenuItem icon={Copy} label="Duplicate" onClick={onDuplicate} />
               <MenuItem icon={CheckCheck} label="Complete all" onClick={onComplete} />

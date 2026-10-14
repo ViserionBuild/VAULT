@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { cn } from '../../lib/utils'
+import { useIsMobile } from '../../hooks/use-media-query'
 
 export function ContextMenu({ items, position, onClose }) {
   const menuRef = useRef(null)
   const [menuPos, setMenuPos] = useState(position)
+  const isMobile = useIsMobile()
 
   useEffect(() => {
     const handler = (e) => {
@@ -40,6 +42,55 @@ export function ContextMenu({ items, position, onClose }) {
   }, [position])
 
   if (!position || !menuPos) return null
+
+  // Phones: an action sheet from the bottom with full-width, thumb-sized rows,
+  // instead of a small popup anchored under the finger.
+  if (isMobile) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-end bg-black/50 animate-in fade-in">
+        <div
+          ref={menuRef}
+          className="w-full rounded-t-2xl border-t border-border bg-background p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] shadow-2xl animate-in sheet-in"
+          role="menu"
+        >
+          <div aria-hidden="true" className="mx-auto mb-2 mt-1 h-1 w-10 rounded-full bg-muted-foreground/30" />
+          {position.data?.title && (
+            <p className="truncate px-4 pb-2 text-sm font-medium text-muted-foreground">
+              {position.data.title}
+            </p>
+          )}
+          {items.map((item, idx) =>
+            item.separator ? (
+              <div key={idx} className="my-1 h-px bg-border" />
+            ) : (
+              <button
+                key={idx}
+                role="menuitem"
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-lg px-4 py-3.5 text-base transition-colors active:bg-muted',
+                  item.danger && 'text-red-500',
+                )}
+                onClick={() => {
+                  item.onClick()
+                  onClose()
+                }}
+                disabled={item.disabled}
+              >
+                {item.icon && <item.icon className="h-5 w-5" />}
+                {item.label}
+              </button>
+            ),
+          )}
+          <button
+            className="mt-1 w-full rounded-lg bg-muted px-4 py-3.5 text-base font-medium active:bg-muted/70"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div
