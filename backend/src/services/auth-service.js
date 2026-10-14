@@ -19,7 +19,7 @@ function readSeconds(name, fallback) {
 
 const SESSION_IDLE_SECONDS = readSeconds('SESSION_IDLE_SECONDS', 5 * 60)
 const SESSION_WARNING_SECONDS = Math.min(
-  readSeconds('SESSION_WARNING_SECONDS', 30),
+  readSeconds('SESSION_WARNING_SECONDS', 60),
   // A warning longer than the session itself would show immediately on login.
   Math.max(SESSION_IDLE_SECONDS - 5, 5),
 )
@@ -47,6 +47,9 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
   const secureCookies = nodeEnv === 'production'
   const authCookiePath = '/api/v1/auth'
   const csrfCookiePath = '/'
+  // Frontend and API live on different sites in production, so cookies must be
+  // SameSite=None (which browsers only accept together with Secure).
+  const sameSite = secureCookies ? 'none' : 'strict'
 
   const encryptCookieValue = (value) => {
     const iv = crypto.randomBytes(12)
@@ -125,7 +128,7 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
   const setRefreshCookie = (res, token) => {
     res.cookie('vault_refresh_token', encryptCookieValue(token), {
       httpOnly: true,
-      sameSite: 'strict',
+      sameSite,
       secure: secureCookies,
       maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
       path: authCookiePath,
@@ -135,7 +138,7 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
   const setCsrfCookie = (res, token) => {
     res.cookie('vault_csrf_token', token, {
       httpOnly: false,
-      sameSite: 'strict',
+      sameSite,
       secure: secureCookies,
       maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
       path: csrfCookiePath,
@@ -143,8 +146,8 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
   }
 
   const clearRefreshCookie = (res) => {
-    res.clearCookie('vault_refresh_token', { path: authCookiePath })
-    res.clearCookie('vault_csrf_token', { path: csrfCookiePath })
+    res.clearCookie('vault_refresh_token', { path: authCookiePath, sameSite, secure: secureCookies })
+    res.clearCookie('vault_csrf_token', { path: csrfCookiePath, sameSite, secure: secureCookies })
   }
 
   const validateCsrf = (req) =>

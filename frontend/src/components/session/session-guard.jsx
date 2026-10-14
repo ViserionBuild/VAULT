@@ -23,15 +23,18 @@ export function SessionGuard({ children }) {
   })
 
   // "Extend" mints a fresh access token as well as restarting the clock, so the
-  // token's own expiry cannot cut the extended session short.
+  // token's own expiry cannot cut the extended session short. The clock restarts
+  // first: a slow refresh (e.g. a cold server) must not let the countdown hit
+  // zero while the user waits on the button.
   const handleExtend = async () => {
+    extend()
     setExtending(true)
     try {
       await refreshSession()
-      extend()
-    } catch {
-      // Refresh token is gone or rejected; nothing left to extend.
-      void expireSession()
+    } catch (error) {
+      // Only a rejected refresh token means there is nothing left to extend. A
+      // network blip is retried by authedRequest on the next 401.
+      if (error.status === 401 || error.status === 403) void expireSession()
     } finally {
       setExtending(false)
     }

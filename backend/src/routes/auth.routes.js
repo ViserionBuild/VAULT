@@ -145,7 +145,10 @@ function createAuthRouter({
       const accessToken = authService.issueAccessToken(user)
       const refreshToken = authService.issueRefreshToken(user)
       await store.storeRefreshToken({ userId: user.id, token: refreshToken })
-      authService.setCsrfCookie(res, authService.issueCsrfToken())
+      // The frontend can't read this cookie cross-site, so the token is also
+      // returned in the body for it to echo back in the x-csrf-token header.
+      const csrfToken = authService.issueCsrfToken()
+      authService.setCsrfCookie(res, csrfToken)
       authService.setRefreshCookie(res, refreshToken)
 
       return res.status(201).json(
@@ -156,6 +159,7 @@ function createAuthRouter({
             email: user.email,
           },
           accessToken,
+          csrfToken,
         }),
       )
     } catch (error) {
@@ -251,7 +255,10 @@ function createAuthRouter({
         userAgent: req.headers['user-agent'],
         ipAddress: clientIp(req),
       })
-      authService.setCsrfCookie(res, authService.issueCsrfToken())
+      // The frontend can't read this cookie cross-site, so the token is also
+      // returned in the body for it to echo back in the x-csrf-token header.
+      const csrfToken = authService.issueCsrfToken()
+      authService.setCsrfCookie(res, csrfToken)
       authService.setRefreshCookie(res, refreshToken)
 
       return res.json(
@@ -262,6 +269,7 @@ function createAuthRouter({
             email: user.email,
           },
           accessToken,
+          csrfToken,
         }),
       )
     } catch (error) {
@@ -331,7 +339,10 @@ function createAuthRouter({
 
       const nextAccessToken = authService.issueAccessToken(user)
       const nextRefreshToken = authService.issueRefreshToken(user)
-      authService.setCsrfCookie(res, authService.issueCsrfToken())
+      // The frontend can't read this cookie cross-site, so the token is also
+      // returned in the body for it to echo back in the x-csrf-token header.
+      const csrfToken = authService.issueCsrfToken()
+      authService.setCsrfCookie(res, csrfToken)
       await store.rotateRefreshToken({
         userAgent: req.headers['user-agent'],
         ipAddress: clientIp(req),
@@ -349,6 +360,7 @@ function createAuthRouter({
             email: user.email,
           },
           accessToken: nextAccessToken,
+          csrfToken,
         }),
       )
     } catch {

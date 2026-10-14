@@ -1,12 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { apiRequest } from '../lib/api'
+import { apiRequest, setCsrfToken } from '../lib/api'
 
 const AuthContext = createContext(null)
 const TOKEN_KEY = 'vault-access-token'
 const USER_KEY = 'vault-user'
 
 // Used only until the server's real values arrive from /auth/session-config.
-const FALLBACK_SESSION_CONFIG = { idleSeconds: 300, warningSeconds: 30 }
+const FALLBACK_SESSION_CONFIG = { idleSeconds: 300, warningSeconds: 60 }
 
 export function AuthProvider({ children }) {
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(TOKEN_KEY))
@@ -34,7 +34,8 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  const persistSession = ({ accessToken: nextToken, user: nextUser }) => {
+  const persistSession = ({ accessToken: nextToken, user: nextUser, csrfToken }) => {
+    setCsrfToken(csrfToken)
     localStorage.setItem(TOKEN_KEY, nextToken)
     localStorage.setItem(USER_KEY, JSON.stringify(nextUser))
     setAccessToken(nextToken)
@@ -42,6 +43,7 @@ export function AuthProvider({ children }) {
   }
 
   const clearSession = () => {
+    setCsrfToken(null)
     localStorage.removeItem(TOKEN_KEY)
     localStorage.removeItem(USER_KEY)
     setAccessToken(null)

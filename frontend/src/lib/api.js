@@ -7,8 +7,21 @@ function getCookie(name) {
     ?.split('=')[1]
 }
 
+const CSRF_KEY = 'vault-csrf-token'
+
+// The API sets the CSRF cookie on its own domain, which document.cookie can't
+// read when the frontend is hosted elsewhere, so the token from the auth
+// response body is kept here instead.
+export function setCsrfToken(token) {
+  if (token) {
+    localStorage.setItem(CSRF_KEY, token)
+  } else {
+    localStorage.removeItem(CSRF_KEY)
+  }
+}
+
 export async function apiRequest(path, { token, body, method = 'GET' } = {}) {
-  const csrfToken = getCookie('vault_csrf_token')
+  const csrfToken = localStorage.getItem(CSRF_KEY) ?? getCookie('vault_csrf_token')
 
   const response = await fetch(`${API_ROOT}${path}`, {
     method,
