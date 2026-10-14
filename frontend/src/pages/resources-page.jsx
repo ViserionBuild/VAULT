@@ -36,7 +36,9 @@ export function ResourcesPage() {
   const [showCreateFolder, setShowCreateFolder] = useState(false)
   const [showAddResource, setShowAddResource] = useState(false)
   const [editItem, setEditItem] = useState(null)
-  const [showMoveDialog, setShowMoveDialog] = useState(false)
+  // Items being moved: one item from its menu, or the current selection.
+  // Kept apart from the selection so cancelling a move leaves it untouched.
+  const [moveIds, setMoveIds] = useState(null)
 
   // Selection
   const [selectedIds, setSelectedIds] = useState([])
@@ -170,12 +172,13 @@ export function ResourcesPage() {
       fetchItems()
     }, 'Could not delete the selected items. Please try again.')
 
-  const handleBulkMove = async (targetParentId) => {
+  const handleMove = async (targetParentId) => {
     await api('/items/bulk', {
       method: 'POST',
-      body: { action: 'move', itemIds: selectedIds, targetParentId },
+      body: { action: 'move', itemIds: moveIds, targetParentId },
     })
-    setSelectedIds([])
+    // Moved items have left this folder, so they can't stay selected.
+    setSelectedIds((prev) => prev.filter((id) => !moveIds.includes(id)))
     fetchItems()
   }
 
@@ -267,10 +270,7 @@ export function ResourcesPage() {
     {
       label: 'Move to...',
       icon: FolderInput,
-      onClick: () => {
-        setSelectedIds([item.id])
-        setShowMoveDialog(true)
-      },
+      onClick: () => setMoveIds([item.id]),
     },
     { separator: true },
     {
@@ -467,8 +467,7 @@ export function ResourcesPage() {
       <BulkActionBar
         count={selectedIds.length}
         onDelete={handleBulkDelete}
-        onMove={() => setShowMoveDialog(true)}
-        onTag={() => {}} // Tag dialog would go here
+        onMove={() => setMoveIds(selectedIds)}
         onClear={() => setSelectedIds([])}
       />
 
@@ -499,11 +498,9 @@ export function ResourcesPage() {
         onSubmit={handleEditItem}
       />
       <MoveDialog
-        open={showMoveDialog}
-        onClose={() => {
-          setShowMoveDialog(false)
-        }}
-        onSubmit={handleBulkMove}
+        open={moveIds !== null}
+        onClose={() => setMoveIds(null)}
+        onSubmit={handleMove}
         api={api}
         workspaceId={activeWorkspace?.id}
       />
