@@ -2,21 +2,13 @@ import { useState } from 'react'
 import { Dialog } from '../ui/dialog'
 import { Input } from '../ui/input'
 import { Button } from '../ui/button'
+import { DEFAULT_FOLDER_COLOR, FolderAppearancePicker } from './folder-appearance'
 
-const DEFAULT_FOLDER_COLOR = '#d1d5db'
-
-const FOLDER_COLORS = [
-  DEFAULT_FOLDER_COLOR,
-  '#7c3aed', '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
-  '#ec4899', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316',
-]
-
-const FOLDER_ICONS = ['📁', '📂', '🗂️', '📋', '📌', '🔖', '💼', '🎯', '🚀', '💡', '📚', '🔬']
 
 export function CreateFolderDialog({ open, onClose, onSubmit }) {
   const [name, setName] = useState('')
   const [color, setColor] = useState(DEFAULT_FOLDER_COLOR)
-  const [icon, setIcon] = useState(FOLDER_ICONS[0])
+  const [icon, setIcon] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -35,7 +27,7 @@ export function CreateFolderDialog({ open, onClose, onSubmit }) {
       await onSubmit({ title: name.trim(), icon, color })
       setName('')
       setColor(DEFAULT_FOLDER_COLOR)
-      setIcon(FOLDER_ICONS[0])
+      setIcon('')
       onClose()
     } catch (err) {
       // Keep the dialog open with the input intact so the user can fix and retry.
@@ -59,42 +51,7 @@ export function CreateFolderDialog({ open, onClose, onSubmit }) {
           />
         </div>
 
-        <div>
-          <label className="mb-1.5 block text-sm font-medium">Icon</label>
-          <div className="flex flex-wrap gap-2">
-            {FOLDER_ICONS.map((ic) => (
-              <button
-                key={ic}
-                type="button"
-                onClick={() => setIcon(ic)}
-                className={`flex h-9 w-9 items-center justify-center rounded-lg text-lg transition-all ${
-                  icon === ic
-                    ? 'bg-primary/20 ring-2 ring-primary scale-110'
-                    : 'hover:bg-muted'
-                }`}
-              >
-                {ic}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <label className="mb-1.5 block text-sm font-medium">Color</label>
-          <div className="flex flex-wrap gap-2">
-            {FOLDER_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setColor(c)}
-                className={`h-7 w-7 rounded-full transition-all ${
-                  color === c ? 'ring-2 ring-primary ring-offset-2 ring-offset-background scale-110' : ''
-                }`}
-                style={{ backgroundColor: c }}
-              />
-            ))}
-          </div>
-        </div>
+        <FolderAppearancePicker icon={icon} color={color} onIconChange={setIcon} onColorChange={setColor} />
 
         {error && (
           <p role="alert" className="rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">

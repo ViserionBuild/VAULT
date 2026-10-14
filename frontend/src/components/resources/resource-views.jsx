@@ -1,5 +1,4 @@
 import {
-  Folder,
   ExternalLink,
   Star,
   MoreVertical,
@@ -9,6 +8,7 @@ import {
 } from 'lucide-react'
 import defaultLinkIcon from '../../assets/default_link_icon.png'
 import { Badge } from '../ui/badge'
+import { FolderGlyph } from './folder-appearance'
 
 // Stored URLs may lack a scheme; without one the browser treats them as
 // relative paths on this site.
@@ -135,19 +135,7 @@ function FolderTile({ item, color, onOpen, onContextMenu, onFavorite, isSelected
       />
 
       <span className="flex h-9 w-9 items-center justify-center">
-        {item.icon ? (
-          <span className="text-2xl leading-none" style={color ? { color } : {}}>
-            {item.icon}
-          </span>
-        ) : (
-          <Folder
-            className="h-8 w-8"
-            style={{ color: color || '#eab308' }}
-            fill="currentColor"
-            fillOpacity={0.2}
-            strokeWidth={1.5}
-          />
-        )}
+        <FolderGlyph icon={item.icon} color={color} size="lg" />
       </span>
 
       {/* Two lines max, like Explorer, so long names stay readable */}
@@ -291,13 +279,7 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
 
       <IconLink item={item} className="flex h-8 w-8 shrink-0 items-center justify-center">
         {isFolder ? (
-          item.icon ? (
-            <span className="text-lg" style={folderColor ? { color: folderColor } : {}}>
-              {item.icon}
-            </span>
-          ) : (
-            <Folder className="h-5 w-5" style={{ color: folderColor || undefined }} />
-          )
+          <FolderGlyph icon={item.icon} color={folderColor} size="md" />
         ) : item.icon?.startsWith('http') ? (
           <img
             src={item.icon}
@@ -473,13 +455,7 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                   <div className="flex items-center gap-2.5">
                     <IconLink item={item} className="flex h-5 w-5 shrink-0 items-center justify-center">
                       {isFolder ? (
-                        item.icon ? (
-                          <span className="text-base" style={folderColor ? { color: folderColor } : {}}>
-                            {item.icon}
-                          </span>
-                        ) : (
-                          <Folder className="h-4 w-4" style={{ color: folderColor || undefined }} />
-                        )
+                        <FolderGlyph icon={item.icon} color={folderColor} size="sm" />
                       ) : item.icon?.startsWith('http') ? (
                         <img
                           src={item.icon}

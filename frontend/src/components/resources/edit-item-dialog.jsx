@@ -2,20 +2,15 @@ import { useState, useEffect } from 'react'
 import { Dialog } from '../ui/dialog'
 import { Input } from '../ui/input'
 import { Button } from '../ui/button'
+import { DEFAULT_FOLDER_COLOR, FolderAppearancePicker } from './folder-appearance'
 
-const FOLDER_COLORS = [
-  '#7c3aed', '#3b82f6', '#10b981', '#f59e0b', '#ef4444',
-  '#ec4899', '#8b5cf6', '#06b6d4', '#84cc16', '#f97316',
-]
-
-const FOLDER_ICONS = ['📁', '📂', '🗂️', '📋', '📌', '🔖', '💼', '🎯', '🚀', '💡', '📚', '🔬']
 
 export function EditItemDialog({ open, onClose, item, onSubmit }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [url, setUrl] = useState('')
   const [icon, setIcon] = useState('')
-  const [color, setColor] = useState(FOLDER_COLORS[0])
+  const [color, setColor] = useState(DEFAULT_FOLDER_COLOR)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -30,8 +25,9 @@ export function EditItemDialog({ open, onClose, item, onSubmit }) {
       setTitle(item.title ?? '')
       setDescription(item.description ?? '')
       setUrl(item.url ?? '')
-      setIcon(item.icon ?? '')
-      setColor(item.metadata?.color ?? FOLDER_COLORS[0])
+      // Legacy default emoji is shown as the plain folder glyph.
+      setIcon(item.type === 'folder' && item.icon === '📁' ? '' : item.icon ?? '')
+      setColor(item.color || item.metadata?.color || DEFAULT_FOLDER_COLOR)
     }
   }, [item])
 
@@ -71,44 +67,7 @@ export function EditItemDialog({ open, onClose, item, onSubmit }) {
         </div>
 
         {item.type === 'folder' && (
-          <div>
-            <label className="mb-1.5 block text-sm font-medium">Folder Icon</label>
-            <div className="flex flex-wrap gap-2">
-              {FOLDER_ICONS.map((ic) => (
-                <button
-                  key={ic}
-                  type="button"
-                  onClick={() => setIcon(ic)}
-                  className={`flex h-9 w-9 items-center justify-center rounded-lg text-lg transition-all ${
-                    icon === ic
-                      ? 'bg-primary/20 ring-2 ring-primary scale-110'
-                      : 'hover:bg-muted'
-                  }`}
-                >
-                  {ic}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {item.type === 'folder' && (
-          <div>
-            <label className="mb-1.5 block text-sm font-medium">Folder Color</label>
-            <div className="flex flex-wrap gap-2">
-              {FOLDER_COLORS.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setColor(c)}
-                  className={`h-7 w-7 rounded-full transition-all ${
-                    color === c ? 'ring-2 ring-primary ring-offset-2 ring-offset-background scale-110' : ''
-                  }`}
-                  style={{ backgroundColor: c }}
-                />
-              ))}
-            </div>
-          </div>
+          <FolderAppearancePicker icon={icon} color={color} onIconChange={setIcon} onColorChange={setColor} />
         )}
 
         {item.type === 'url' && (
