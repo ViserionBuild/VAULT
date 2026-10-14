@@ -122,12 +122,6 @@ export function NoteCard({ item, onOpen, onContextMenu, onFavorite, isSelected, 
 }
 
 // ── List ──────────────────────────────────────────────────────────
-const LIST_COLUMNS = [
-  { key: 'title', label: 'Name', className: 'flex-1 min-w-0' },
-  { key: 'type', label: 'Type', className: 'hidden sm:block w-24 shrink-0' },
-  { key: 'updatedAt', label: 'Modified', className: 'hidden md:block w-32 shrink-0' },
-]
-
 function SortArrow({ active, sortOrder }) {
   const Icon = active && sortOrder === 'desc' ? ArrowDown : ArrowUp
   return (
@@ -139,105 +133,6 @@ function SortArrow({ active, sortOrder }) {
   )
 }
 
-export function NoteListHeader({ onSort, sortBy, sortOrder, allSelected, someSelected, onToggleAll }) {
-  return (
-    <div className="flex items-center gap-3 border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-      <span className="flex w-4 shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
-        <input
-          type="checkbox"
-          checked={allSelected}
-          ref={(el) => { if (el) el.indeterminate = !allSelected && someSelected }}
-          onChange={onToggleAll}
-          className="h-4 w-4 cursor-pointer rounded border-border accent-primary"
-          aria-label="Select all notes"
-        />
-      </span>
-      <span className="w-8 shrink-0" aria-hidden="true" />
-      {LIST_COLUMNS.map((col) => {
-        const active = sortBy === col.key
-        return (
-          <button
-            key={col.key}
-            type="button"
-            onClick={() => onSort(col.key)}
-            aria-sort={active ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none'}
-            className={`group/sort flex items-center gap-1 text-left transition-colors hover:text-foreground ${
-              active ? 'text-foreground' : ''
-            } ${col.className}`}
-          >
-            <span className="truncate">{col.label}</span>
-            <SortArrow active={active} sortOrder={sortOrder} />
-          </button>
-        )
-      })}
-      <span className="w-[60px] shrink-0" aria-hidden="true" />
-    </div>
-  )
-}
-
-export function NoteListItem({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect, dnd }) {
-  const preview = item.type === 'note' ? stripHtml(item.content) : item.description
-  return (
-    <div
-      className={`group flex cursor-pointer items-center gap-3 border-b border-border/50 px-3 py-2 transition-colors last:border-b-0 ${
-        isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'
-      } ${dropHighlight(dnd, item)} ${focusRing}`}
-      onClick={() => onOpen(item)}
-      onContextMenu={(e) => onContextMenu(e, item)}
-      {...dragProps(dnd, item)}
-      {...keyboardProps(item, onOpen, () => onSelect(item.id))}
-    >
-      <span className="flex w-4 shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
-        <input
-          type="checkbox"
-          checked={isSelected}
-          onChange={() => onSelect(item.id)}
-          className={`h-4 w-4 cursor-pointer rounded border-border accent-primary transition-opacity ${
-            isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 touch:invisible group-data-[selecting=true]/sel:visible group-data-[selecting=true]/sel:opacity-100'
-          }`}
-          aria-label={`Select ${item.title}`}
-        />
-      </span>
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center">
-        <NoteIcon item={item} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{item.title}</div>
-        {preview ? (
-          <div className="truncate text-xs text-muted-foreground">{preview}</div>
-        ) : null}
-      </div>
-      <span className="hidden w-24 shrink-0 text-xs text-muted-foreground sm:block">
-        {item.type === 'folder' ? 'Folder' : 'Note'}
-      </span>
-      <span className="hidden w-32 shrink-0 whitespace-nowrap text-xs text-muted-foreground md:block">
-        {formatDate(item.updatedAt)}
-      </span>
-      <div className="flex w-[60px] shrink-0 items-center justify-end gap-0.5">
-        <button
-          className={`rounded-full p-1.5 transition-all hover:bg-muted ${
-            item.isFavorite
-              ? 'text-yellow-400'
-              : 'text-muted-foreground/40 opacity-0 hover:text-yellow-400 group-hover:opacity-100 touch:hidden'
-          }`}
-          onClick={(e) => { e.stopPropagation(); onFavorite(item.id) }}
-          aria-label={item.isFavorite ? 'Remove favorite' : 'Add favorite'}
-        >
-          <Star className="h-3.5 w-3.5" fill={item.isFavorite ? 'currentColor' : 'none'} />
-        </button>
-        <button
-          className="rounded-full p-1.5 text-muted-foreground/60 opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100 touch:opacity-100"
-          onClick={(e) => { e.stopPropagation(); onContextMenu(e, item) }}
-          aria-label="Open menu"
-        >
-          <MoreVertical className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ── Table (detail) ────────────────────────────────────────────────
 export function NoteTable({ items, onOpen, onContextMenu, onFavorite, selectedIds, onSelect, onSort, sortBy, sortOrder, dnd }) {
   const columns = [
     { key: 'title', label: 'Name', sortable: true, className: 'min-w-[200px]' },

@@ -19,7 +19,7 @@ import { ResourceSearch } from '../components/resources/resource-search'
 import { BulkActionBar } from '../components/resources/bulk-action-bar'
 import { SortMenu } from '../components/items/sort-menu'
 import { useItemDragDrop } from '../components/items/use-item-drag-drop'
-import { NoteCard, NoteListHeader, NoteListItem, NoteTable } from '../components/notes/note-views'
+import { NoteCard, NoteTable } from '../components/notes/note-views'
 import { NoteEditorDialog } from '../components/notes/note-editor-dialog'
 import { FolderNameDialog } from '../components/notes/folder-name-dialog'
 import {
@@ -35,7 +35,7 @@ import {
 
 // Notes has the Cards view's toggle slot but no preview images; keep the
 // three views it supports.
-const NOTE_VIEWS = ['grid', 'list', 'table']
+const NOTE_VIEWS = ['grid', 'table']
 
 export function NotesPage() {
   const api = useApi()
@@ -49,6 +49,8 @@ export function NotesPage() {
   const [loadError, setLoadError] = useState(false)
   const [view, setView] = useState(() => {
     const saved = localStorage.getItem('vault-notes-view')
+    // The list view was folded into the table; a saved "list" opens the table.
+    if (saved === 'list') return 'table'
     return NOTE_VIEWS.includes(saved) ? saved : 'grid'
   })
   const { sortBy, sortOrder, changeSort, toggleColumn } = usePersistentSort('vault-notes-sort')
@@ -317,12 +319,6 @@ export function NotesPage() {
     )
   }
 
-  const allSelected = items.length > 0 && selectedIds.length === items.length
-  const someSelected = selectedIds.length > 0 && !allSelected
-  const handleToggleAll = () => {
-    setSelectedIds(allSelected ? [] : items.map((item) => item.id))
-  }
-
   const gridFolders = items.filter((item) => item.type === 'folder')
   const gridNotes = items.filter((item) => item.type !== 'folder')
 
@@ -561,29 +557,6 @@ export function NotesPage() {
                 </div>
               </div>
             )}
-          </div>
-        )}
-
-        {/* List View */}
-        {view === 'list' && items.length > 0 && (
-          <div className="rounded-lg border border-border">
-            <NoteListHeader
-              onSort={toggleColumn}
-              sortBy={sortBy}
-              sortOrder={sortOrder}
-              allSelected={allSelected}
-              someSelected={someSelected}
-              onToggleAll={handleToggleAll}
-            />
-            {items.map((item) => (
-              <NoteListItem
-                key={item.id}
-                item={item}
-                isSelected={selectedIds.includes(item.id)}
-                onSelect={handleSelect}
-                {...sharedItemProps}
-              />
-            ))}
           </div>
         )}
 
