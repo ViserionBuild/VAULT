@@ -144,8 +144,16 @@ function createAuthRouter({
 
       const accessToken = authService.issueAccessToken(user)
       const refreshToken = authService.issueRefreshToken(user)
-      await store.storeRefreshToken({ userId: user.id, token: refreshToken })
-      authService.setCsrfCookie(res, authService.issueCsrfToken())
+      await store.storeRefreshToken({
+        userId: user.id,
+        token: refreshToken,
+        userAgent: req.headers['user-agent'],
+        ipAddress: clientIp(req),
+      })
+      // The frontend can't read this cookie cross-site, so the token is also
+      // returned in the body for it to echo back in the x-csrf-token header.
+      const csrfToken = authService.issueCsrfToken()
+      authService.setCsrfCookie(res, csrfToken)
       authService.setRefreshCookie(res, refreshToken)
 
       return res.status(201).json(
@@ -156,6 +164,7 @@ function createAuthRouter({
             email: user.email,
           },
           accessToken,
+          csrfToken,
         }),
       )
     } catch (error) {
@@ -251,7 +260,10 @@ function createAuthRouter({
         userAgent: req.headers['user-agent'],
         ipAddress: clientIp(req),
       })
-      authService.setCsrfCookie(res, authService.issueCsrfToken())
+      // The frontend can't read this cookie cross-site, so the token is also
+      // returned in the body for it to echo back in the x-csrf-token header.
+      const csrfToken = authService.issueCsrfToken()
+      authService.setCsrfCookie(res, csrfToken)
       authService.setRefreshCookie(res, refreshToken)
 
       return res.json(
@@ -262,6 +274,7 @@ function createAuthRouter({
             email: user.email,
           },
           accessToken,
+          csrfToken,
         }),
       )
     } catch (error) {
@@ -331,7 +344,10 @@ function createAuthRouter({
 
       const nextAccessToken = authService.issueAccessToken(user)
       const nextRefreshToken = authService.issueRefreshToken(user)
-      authService.setCsrfCookie(res, authService.issueCsrfToken())
+      // The frontend can't read this cookie cross-site, so the token is also
+      // returned in the body for it to echo back in the x-csrf-token header.
+      const csrfToken = authService.issueCsrfToken()
+      authService.setCsrfCookie(res, csrfToken)
       await store.rotateRefreshToken({
         userAgent: req.headers['user-agent'],
         ipAddress: clientIp(req),
@@ -349,6 +365,7 @@ function createAuthRouter({
             email: user.email,
           },
           accessToken: nextAccessToken,
+          csrfToken,
         }),
       )
     } catch {
@@ -358,6 +375,44 @@ function createAuthRouter({
           code: 'UNAUTHORIZED',
           message: 'Invalid or expired refresh token',
         }),
+      )
+    }
+  })
+
+  // Sent by the client while the user is active. Keeps the session from going
+  // stale between token refreshes, and tells a device whose session was ended
+  // elsewhere (e.g. kicked from the session-limit picker) to sign out now
+  // instead of when its access token expires.
+  router.post('/heartbeat', protectedLimiter, async (req, res) => {
+    if (!authService.validateCsrf(req)) {
+      return res.status(403).json(
+        responseEnvelope(null, {
+          code: 'FORBIDDEN',
+          message: 'CSRF validation failed',
+        }),
+      )
+    }
+
+    const currentRefreshToken = authService.decryptCookieValue(req.cookies?.vault_refresh_token)
+    try {
+      const live = currentRefreshToken
+        ? await store.touchRefreshToken(currentRefreshToken)
+        : false
+
+      if (!live) {
+        authService.clearRefreshCookie(res)
+        return res.status(401).json(
+          responseEnvelope(null, {
+            code: 'SESSION_ENDED',
+            message: 'This session has ended',
+          }),
+        )
+      }
+
+      return res.json(responseEnvelope({ active: true }))
+    } catch {
+      return res.status(500).json(
+        responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Unable to record activity' }),
       )
     }
   })

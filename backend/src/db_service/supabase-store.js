@@ -1,5 +1,6 @@
 const crypto = require('node:crypto')
 const { createSupabaseClient } = require('./supabase')
+const { SESSION_STALE_SECONDS } = require('../services/auth-service')
 
 const REFRESH_TOKEN_TTL_SECONDS = 7 * 24 * 60 * 60
 
@@ -236,6 +237,8 @@ function warnMissingSessionColumns() {
   )
 }
 
+const staleCutoffIso = () => new Date(Date.now() - SESSION_STALE_SECONDS * 1000).toISOString()
+
 class SupabaseStore {
   constructor(client) {
     this.client = client
@@ -417,8 +420,8 @@ class SupabaseStore {
     }
   }
 
-  // Active = not revoked and not expired. This is the definition the session
-  // limit enforces, so listing and counting must agree exactly.
+  // Active = not revoked, not expired and not stale. This is the definition the
+  // session limit enforces, so listing and counting must agree exactly.
   async listActiveSessions(userId) {
     const nowIso = new Date().toISOString()
     const { data, error } = await this.client
@@ -427,6 +430,7 @@ class SupabaseStore {
       .eq('user_id', String(userId))
       .is('revoked_at', null)
       .gt('expires_at', nowIso)
+      .gt('last_used_at', staleCutoffIso())
       .order('last_used_at', { ascending: false })
 
     if (error) {
@@ -472,21 +476,29 @@ class SupabaseStore {
     return (data ?? []).length > 0
   }
 
+  // Marks a live session as in use. Returns false when the session is revoked,
+  // expired or already stale, so the caller can tell the client it was ended.
   async touchRefreshToken(token) {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
-    const { error } = await this.client
+    const { data, error } = await this.client
       .from('refresh_tokens')
       .update({ last_used_at: new Date().toISOString() })
       .eq('token_hash', tokenHash)
+      .is('revoked_at', null)
+      .gt('expires_at', new Date().toISOString())
+      .gt('last_used_at', staleCutoffIso())
+      .select('token_hash')
 
     if (error) {
-      // Activity tracking is cosmetic; never fail a request over it.
+      // Pre-migration there is no activity column; treat the session as live.
       if (error.code === '42703' || error.code === 'PGRST204') {
         warnMissingSessionColumns()
-        return
+        return Boolean(await this.findValidRefreshToken(token))
       }
       throw error
     }
+
+    return (data ?? []).length > 0
   }
 
   async rotateRefreshToken({ oldToken, newToken, userId, userAgent, ipAddress }) {
@@ -498,15 +510,27 @@ class SupabaseStore {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
     const nowIso = new Date().toISOString()
 
-    const { data, error } = await this.client
-      .from('refresh_tokens')
-      .select('*')
-      .eq('token_hash', tokenHash)
-      .is('revoked_at', null)
-      .gt('expires_at', nowIso)
-      .limit(1)
+    const query = () =>
+      this.client
+        .from('refresh_tokens')
+        .select('*')
+        .eq('token_hash', tokenHash)
+        .is('revoked_at', null)
+        .gt('expires_at', nowIso)
 
-    if (error) throw error
+    // Stale sessions can't be refreshed: the idle timeout is enforced here, not
+    // only in the browser, so reopening a closed tab later requires a login.
+    const { data, error } = await query().gt('last_used_at', staleCutoffIso()).limit(1)
+
+    if (error) {
+      if (error.code === '42703') {
+        warnMissingSessionColumns()
+        const { data: fallback, error: fallbackError } = await query().limit(1)
+        if (fallbackError) throw fallbackError
+        return fallback?.[0] ?? null
+      }
+      throw error
+    }
     return data?.[0] ?? null
   }
 

@@ -7,8 +7,21 @@ function getCookie(name) {
     ?.split('=')[1]
 }
 
+const CSRF_KEY = 'vault-csrf-token'
+
+// The API sets the CSRF cookie on its own domain, which document.cookie can't
+// read when the frontend is hosted elsewhere, so the token from the auth
+// response body is kept here instead.
+export function setCsrfToken(token) {
+  if (token) {
+    localStorage.setItem(CSRF_KEY, token)
+  } else {
+    localStorage.removeItem(CSRF_KEY)
+  }
+}
+
 export async function apiRequest(path, { token, body, method = 'GET' } = {}) {
-  const csrfToken = getCookie('vault_csrf_token')
+  const csrfToken = localStorage.getItem(CSRF_KEY) ?? getCookie('vault_csrf_token')
 
   const response = await fetch(`${API_ROOT}${path}`, {
     method,
@@ -21,10 +34,18 @@ export async function apiRequest(path, { token, body, method = 'GET' } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   })
 
-  const payload = await response.json()
+  // Not every error is our JSON envelope: the host returns HTML for 502s while
+  // the server wakes up, and the rate limiter replies in plain text.
+  const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
-    const error = new Error(payload?.error?.message ?? 'Request failed')
+    const fallback =
+      response.status === 429
+        ? 'Too many requests. Please wait a moment and try again.'
+        : response.status >= 500
+          ? 'The server is unavailable right now. Please try again shortly.'
+          : 'Request failed'
+    const error = new Error(payload?.error?.message ?? fallback)
     error.status = response.status
     error.code = payload?.error?.code
     // Callers need this for structured errors such as SESSION_LIMIT_REACHED,
@@ -33,5 +54,5 @@ export async function apiRequest(path, { token, body, method = 'GET' } = {}) {
     throw error
   }
 
-  return payload.data
+  return payload?.data
 }

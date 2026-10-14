@@ -19,7 +19,7 @@ function readSeconds(name, fallback) {
 
 const SESSION_IDLE_SECONDS = readSeconds('SESSION_IDLE_SECONDS', 5 * 60)
 const SESSION_WARNING_SECONDS = Math.min(
-  readSeconds('SESSION_WARNING_SECONDS', 30),
+  readSeconds('SESSION_WARNING_SECONDS', 60),
   // A warning longer than the session itself would show immediately on login.
   Math.max(SESSION_IDLE_SECONDS - 5, 5),
 )
@@ -40,6 +40,12 @@ const MAX_CONCURRENT_SESSIONS = (() => {
 })()
 
 const ACCESS_TOKEN_TTL = SESSION_IDLE_SECONDS + 30
+
+// A session untouched for longer than the idle window (plus grace for the
+// client's heartbeat interval and clock skew) was abandoned, e.g. a tab closed
+// without logging out. It can no longer be refreshed and stops counting toward
+// MAX_CONCURRENT_SESSIONS, so forgotten devices don't lock the account out.
+const SESSION_STALE_SECONDS = SESSION_IDLE_SECONDS + 90
 const REFRESH_TOKEN_TTL_SECONDS = readSeconds('REFRESH_TOKEN_TTL_SECONDS', 7 * 24 * 60 * 60)
 
 function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecret, nodeEnv }) {
@@ -47,6 +53,9 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
   const secureCookies = nodeEnv === 'production'
   const authCookiePath = '/api/v1/auth'
   const csrfCookiePath = '/'
+  // Frontend and API live on different sites in production, so cookies must be
+  // SameSite=None (which browsers only accept together with Secure).
+  const sameSite = secureCookies ? 'none' : 'strict'
 
   const encryptCookieValue = (value) => {
     const iv = crypto.randomBytes(12)
@@ -125,7 +134,7 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
   const setRefreshCookie = (res, token) => {
     res.cookie('vault_refresh_token', encryptCookieValue(token), {
       httpOnly: true,
-      sameSite: 'strict',
+      sameSite,
       secure: secureCookies,
       maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
       path: authCookiePath,
@@ -135,7 +144,7 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
   const setCsrfCookie = (res, token) => {
     res.cookie('vault_csrf_token', token, {
       httpOnly: false,
-      sameSite: 'strict',
+      sameSite,
       secure: secureCookies,
       maxAge: REFRESH_TOKEN_TTL_SECONDS * 1000,
       path: csrfCookiePath,
@@ -143,8 +152,8 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
   }
 
   const clearRefreshCookie = (res) => {
-    res.clearCookie('vault_refresh_token', { path: authCookiePath })
-    res.clearCookie('vault_csrf_token', { path: csrfCookiePath })
+    res.clearCookie('vault_refresh_token', { path: authCookiePath, sameSite, secure: secureCookies })
+    res.clearCookie('vault_csrf_token', { path: csrfCookiePath, sameSite, secure: secureCookies })
   }
 
   const validateCsrf = (req) =>
@@ -172,5 +181,6 @@ module.exports = {
   REFRESH_TOKEN_TTL_SECONDS,
   SESSION_IDLE_SECONDS,
   SESSION_WARNING_SECONDS,
+  SESSION_STALE_SECONDS,
   MAX_CONCURRENT_SESSIONS,
 }

@@ -1,12 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import { apiRequest } from '../lib/api'
+import { apiRequest, setCsrfToken } from '../lib/api'
 
 const AuthContext = createContext(null)
 const TOKEN_KEY = 'vault-access-token'
 const USER_KEY = 'vault-user'
+// Why the session ended, written before the token is removed so other tabs
+// can show the same notice when they follow it to the login page.
+const END_REASON_KEY = 'vault-session-end-reason'
 
 // Used only until the server's real values arrive from /auth/session-config.
-const FALLBACK_SESSION_CONFIG = { idleSeconds: 300, warningSeconds: 30 }
+const FALLBACK_SESSION_CONFIG = { idleSeconds: 300, warningSeconds: 60 }
 
 export function AuthProvider({ children }) {
   const [accessToken, setAccessToken] = useState(() => localStorage.getItem(TOKEN_KEY))
@@ -34,19 +37,55 @@ export function AuthProvider({ children }) {
     }
   }, [])
 
-  const persistSession = ({ accessToken: nextToken, user: nextUser }) => {
-    localStorage.setItem(TOKEN_KEY, nextToken)
+  const persistSession = ({ accessToken: nextToken, user: nextUser, csrfToken }) => {
+    setCsrfToken(csrfToken)
+    localStorage.removeItem(END_REASON_KEY)
+    // User before token: other tabs react to the token key and read the user.
     localStorage.setItem(USER_KEY, JSON.stringify(nextUser))
+    localStorage.setItem(TOKEN_KEY, nextToken)
     setAccessToken(nextToken)
     setUser(nextUser)
   }
 
-  const clearSession = () => {
-    localStorage.removeItem(TOKEN_KEY)
+  // `reason` ('idle' | 'ended') is shown on the login page, here and in every
+  // other open tab.
+  const clearSession = (reason) => {
+    setCsrfToken(null)
+    if (reason) {
+      localStorage.setItem(END_REASON_KEY, reason)
+      setExpiredNotice(reason)
+    } else {
+      localStorage.removeItem(END_REASON_KEY)
+    }
     localStorage.removeItem(USER_KEY)
+    localStorage.removeItem(TOKEN_KEY)
     setAccessToken(null)
     setUser(null)
   }
+
+  // Keep every tab on the same session: when one tab signs out (idle expiry,
+  // logout, or ended elsewhere) the others drop to the login page too, and a
+  // sign-in or token refresh in one tab is picked up by the rest.
+  useEffect(() => {
+    const onStorage = (event) => {
+      if (event.key !== TOKEN_KEY) return
+
+      if (event.newValue) {
+        const raw = localStorage.getItem(USER_KEY)
+        setAccessToken(event.newValue)
+        setUser(raw ? JSON.parse(raw) : null)
+        setExpiredNotice(false)
+        return
+      }
+
+      setAccessToken(null)
+      setUser(null)
+      setExpiredNotice(localStorage.getItem(END_REASON_KEY) || false)
+    }
+
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
 
   const login = async (email, password) => {
     setLoading(true)
@@ -74,28 +113,75 @@ export function AuthProvider({ children }) {
     }
   }
 
-  const refreshSession = async () => {
-    const data = await apiRequest('/auth/refresh', { method: 'POST' })
-    persistSession(data)
-  }
+  // Coalesces concurrent refreshes: several requests can 401 at once, and
+  // each rotating the refresh token in turn would invalidate the others.
+  const refreshPromiseRef = useRef(null)
 
-  const logout = async () => {
-    try {
-      await apiRequest('/auth/logout', { method: 'POST' })
-    } finally {
-      clearSession()
+  const refreshOnce = useCallback(async () => {
+    if (!refreshPromiseRef.current) {
+      const tokenBefore = localStorage.getItem(TOKEN_KEY)
+      refreshPromiseRef.current = apiRequest('/auth/refresh', { method: 'POST' })
+        .then((data) => {
+          persistSession(data)
+          return data.accessToken
+        })
+        .catch((error) => {
+          // Another tab refreshed at the same moment: it rotated the cookie, so
+          // ours was rejected, but its new token is already shared here. Use it
+          // rather than signing every tab out.
+          const tokenNow = localStorage.getItem(TOKEN_KEY)
+          if (tokenNow && tokenNow !== tokenBefore) return tokenNow
+          throw error
+        })
+        .finally(() => {
+          refreshPromiseRef.current = null
+        })
     }
+    return refreshPromiseRef.current
+  }, [])
+
+  const refreshSession = async () => {
+    await refreshOnce()
   }
 
-  // Idle expiry. Clears local state first so the UI locks immediately even if
-  // the network call is slow or fails.
-  const expireSession = useCallback(async () => {
-    clearSession()
-    setExpiredNotice(true)
+  // Clears local state at once so the UI locks immediately, even if the server
+  // is slow to wake. The logout request is started first: apiRequest reads the
+  // CSRF token when called, and clearSession erases it. Without it the logout
+  // is rejected, the session is never revoked, and it still counts toward the
+  // device limit when the user signs straight back in.
+  const endSession = useCallback(async (reason) => {
+    const revoke = apiRequest('/auth/logout', { method: 'POST' })
+    clearSession(reason)
     try {
-      await apiRequest('/auth/logout', { method: 'POST' })
+      await revoke
     } catch {
-      // Cookie is cleared server-side on the next refresh attempt anyway.
+      // Unrevoked sessions go stale server-side shortly anyway.
+    }
+  }, [])
+
+  const logout = useCallback(() => endSession(), [endSession])
+  const expireSession = useCallback(() => endSession('idle'), [endSession])
+
+  // Records activity server-side so the session isn't treated as abandoned,
+  // and signs out immediately if it was ended on another device.
+  const sendHeartbeat = useCallback(async () => {
+    const beat = () => apiRequest('/auth/heartbeat', { method: 'POST' })
+    try {
+      await beat()
+    } catch (error) {
+      if (error.status !== 401) return // Cold server or network blip; next beat retries.
+
+      // A refresh running at the same time rotates the cookie and revokes the
+      // token this beat carried. Retry once with the new cookie before
+      // concluding the session was really ended.
+      try {
+        await refreshPromiseRef.current?.catch(() => {})
+        await beat()
+      } catch (retryError) {
+        if (retryError.status === 401) {
+          clearSession('ended')
+        }
+      }
     }
   }, [])
 
@@ -111,24 +197,6 @@ export function AuthProvider({ children }) {
       return null
     }
   }
-
-  // Coalesces concurrent refreshes: several requests can 401 at once, and
-  // each rotating the refresh token in turn would invalidate the others.
-  const refreshPromiseRef = useRef(null)
-
-  const refreshOnce = useCallback(async () => {
-    if (!refreshPromiseRef.current) {
-      refreshPromiseRef.current = apiRequest('/auth/refresh', { method: 'POST' })
-        .then((data) => {
-          persistSession(data)
-          return data.accessToken
-        })
-        .finally(() => {
-          refreshPromiseRef.current = null
-        })
-    }
-    return refreshPromiseRef.current
-  }, [])
 
   /**
    * Authenticated request that transparently recovers from an expired access
@@ -151,8 +219,7 @@ export function AuthProvider({ children }) {
           return await apiRequest(path, { ...options, token: nextToken })
         } catch (refreshError) {
           if (refreshError.status === 401 || refreshError.status === 403) {
-            clearSession()
-            setExpiredNotice(true)
+            clearSession('ended')
           }
           throw refreshError
         }
@@ -189,11 +256,15 @@ export function AuthProvider({ children }) {
           localStorage.setItem(USER_KEY, JSON.stringify(me.user))
           setUser(me.user)
         }
-      } catch {
-        try {
-          await refreshSession()
-        } catch {
-          clearSession()
+      } catch (meError) {
+        // Only an auth rejection ends the session. A cold or unreachable server
+        // must not log the user out; later requests retry on their own.
+        if (meError.status === 401) {
+          try {
+            await refreshSession()
+          } catch (refreshError) {
+            if (refreshError.status === 401 || refreshError.status === 403) clearSession()
+          }
         }
       } finally {
         if (!cancelled) setReady(true)
@@ -223,6 +294,7 @@ export function AuthProvider({ children }) {
     authedRequest,
     sessionConfig,
     expireSession,
+    sendHeartbeat,
     expiredNotice,
     clearExpiredNotice: () => setExpiredNotice(false),
   }
