@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/auth-context'
 import { Button } from '../components/ui/button'
+import vaultLogo from '../assets/vault-logo.webp'
 
 export function SignupPage() {
   const { signup, loading } = useAuth()
@@ -24,7 +25,12 @@ export function SignupPage() {
   return (
     <main className="flex min-h-screen items-center justify-center p-4">
       <form className="w-full max-w-md space-y-4 rounded-xl border p-5" onSubmit={handleSubmit}>
-        <h1 className="text-xl font-semibold">Create your VAULT account</h1>
+        <img
+          src={vaultLogo}
+          alt="VAULT"
+          className="mx-auto h-16 w-16 rounded-2xl shadow-lg shadow-fuchsia-500/20 ring-1 ring-white/10"
+        />
+        <h1 className="text-center text-xl font-semibold">Create your VAULT account</h1>
         <input className="w-full rounded-md border bg-background p-2" name="name" placeholder="Name" required minLength={2} />
         <input className="w-full rounded-md border bg-background p-2" name="email" type="email" placeholder="Email" required />
         <input
