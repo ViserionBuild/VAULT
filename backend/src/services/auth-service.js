@@ -40,6 +40,12 @@ const MAX_CONCURRENT_SESSIONS = (() => {
 })()
 
 const ACCESS_TOKEN_TTL = SESSION_IDLE_SECONDS + 30
+
+// A session untouched for longer than the idle window (plus grace for the
+// client's heartbeat interval and clock skew) was abandoned, e.g. a tab closed
+// without logging out. It can no longer be refreshed and stops counting toward
+// MAX_CONCURRENT_SESSIONS, so forgotten devices don't lock the account out.
+const SESSION_STALE_SECONDS = SESSION_IDLE_SECONDS + 90
 const REFRESH_TOKEN_TTL_SECONDS = readSeconds('REFRESH_TOKEN_TTL_SECONDS', 7 * 24 * 60 * 60)
 
 function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecret, nodeEnv }) {
@@ -175,5 +181,6 @@ module.exports = {
   REFRESH_TOKEN_TTL_SECONDS,
   SESSION_IDLE_SECONDS,
   SESSION_WARNING_SECONDS,
+  SESSION_STALE_SECONDS,
   MAX_CONCURRENT_SESSIONS,
 }

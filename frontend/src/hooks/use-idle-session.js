@@ -31,18 +31,20 @@ function writeSharedDeadline(deadline) {
  * report time remaining that has already elapsed. Every tick recomputes from
  * Date.now(), which stays correct even if the tab was suspended.
  */
-export function useIdleSession({ idleSeconds, warningSeconds, onExpire, enabled }) {
+export function useIdleSession({ idleSeconds, warningSeconds, onExpire, onActivity, enabled }) {
   const [secondsLeft, setSecondsLeft] = useState(null)
 
   const deadlineRef = useRef(0)
   const lastResetRef = useRef(0)
   const expiredRef = useRef(false)
   const onExpireRef = useRef(onExpire)
+  const onActivityRef = useRef(onActivity)
 
-  // Keep the latest callback without making it a dependency of the interval.
+  // Keep the latest callbacks without making them dependencies of the interval.
   useEffect(() => {
     onExpireRef.current = onExpire
-  }, [onExpire])
+    onActivityRef.current = onActivity
+  }, [onExpire, onActivity])
 
   const resetDeadline = useCallback(() => {
     const now = Date.now()
@@ -80,13 +82,14 @@ export function useIdleSession({ idleSeconds, warningSeconds, onExpire, enabled 
       }
     }
 
-    const onActivity = () => {
+    const handleActivity = () => {
       const now = Date.now()
       // Once the warning is up, only the explicit button may extend the
       // session. Otherwise an accidental scroll would silently dismiss it.
       if (now >= deadlineRef.current - warningSeconds * 1000) return
       if (now - lastResetRef.current < RESET_THROTTLE_MS) return
       resetDeadline()
+      onActivityRef.current?.()
     }
 
     // Another tab saw activity or the user extended there: adopt its deadline,
@@ -107,7 +110,7 @@ export function useIdleSession({ idleSeconds, warningSeconds, onExpire, enabled 
     }
 
     ACTIVITY_EVENTS.forEach((evt) =>
-      window.addEventListener(evt, onActivity, { passive: true }),
+      window.addEventListener(evt, handleActivity, { passive: true }),
     )
     window.addEventListener('storage', onStorage)
     document.addEventListener('visibilitychange', onVisibility)
@@ -116,7 +119,7 @@ export function useIdleSession({ idleSeconds, warningSeconds, onExpire, enabled 
 
     return () => {
       clearInterval(interval)
-      ACTIVITY_EVENTS.forEach((evt) => window.removeEventListener(evt, onActivity))
+      ACTIVITY_EVENTS.forEach((evt) => window.removeEventListener(evt, handleActivity))
       window.removeEventListener('storage', onStorage)
       document.removeEventListener('visibilitychange', onVisibility)
       // Don't carry a stale countdown into the next session.

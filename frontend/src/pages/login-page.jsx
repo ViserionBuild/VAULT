@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import {
   Vault,
   Mail,
@@ -16,7 +16,7 @@ import { ActiveSessionsDialog } from '../components/session/active-sessions-dial
 import { apiRequest } from '../lib/api'
 
 export function LoginPage() {
-  const { login, loading, expiredNotice, clearExpiredNotice } = useAuth()
+  const { login, loading, expiredNotice, clearExpiredNotice, isAuthenticated } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const [error, setError] = useState('')
@@ -76,6 +76,9 @@ export function LoginPage() {
     setPendingCredentials(null)
   }
 
+  // Signed in from another tab while this one sat on the login page.
+  if (isAuthenticated && !sessionLimit) return <Navigate to="/" replace />
+
   return (
     <main className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
       {/* Ambient background: layered radial tints, no external assets */}
@@ -117,7 +120,11 @@ export function LoginPage() {
           {expiredNotice ? (
             <div className="flex items-start gap-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm text-yellow-700 dark:text-yellow-400">
               <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
-              <span>Your session ended due to inactivity. Please sign in again.</span>
+              <span>
+                {expiredNotice === 'idle'
+                  ? 'Your session ended due to inactivity. Please sign in again.'
+                  : 'Your session has ended. Please sign in again.'}
+              </span>
             </div>
           ) : null}
 

@@ -1,15 +1,34 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAuth } from '../../contexts/auth-context'
 import { useIdleSession } from '../../hooks/use-idle-session'
 import { SessionTimeoutDialog } from './session-timeout-dialog'
+
+// The server treats a session as abandoned after the idle window plus 90s of
+// silence, so beating at most once a minute while active keeps it comfortably
+// alive without a request per click.
+const HEARTBEAT_INTERVAL_MS = 60_000
 
 /**
  * Runs the idle timer for an authenticated session and shows the countdown.
  * Rendered inside the protected area so the timer never runs on public pages.
  */
 export function SessionGuard({ children }) {
-  const { isAuthenticated, sessionConfig, expireSession, refreshSession, logout } = useAuth()
+  const { isAuthenticated, sessionConfig, expireSession, refreshSession, logout, sendHeartbeat } =
+    useAuth()
   const [extending, setExtending] = useState(false)
+  const lastHeartbeatRef = useRef(0)
+
+  const handleActivity = useCallback(() => {
+    const now = Date.now()
+    if (now - lastHeartbeatRef.current < HEARTBEAT_INTERVAL_MS) return
+    lastHeartbeatRef.current = now
+    void sendHeartbeat()
+  }, [sendHeartbeat])
+
+  // Beat once on entry so a session ended elsewhere is caught right away.
+  useEffect(() => {
+    if (isAuthenticated) handleActivity()
+  }, [isAuthenticated, handleActivity])
 
   const handleExpire = useCallback(() => {
     void expireSession()
@@ -19,6 +38,7 @@ export function SessionGuard({ children }) {
     idleSeconds: sessionConfig.idleSeconds,
     warningSeconds: sessionConfig.warningSeconds,
     onExpire: handleExpire,
+    onActivity: handleActivity,
     enabled: isAuthenticated,
   })
 

@@ -34,10 +34,18 @@ export async function apiRequest(path, { token, body, method = 'GET' } = {}) {
     body: body ? JSON.stringify(body) : undefined,
   })
 
-  const payload = await response.json()
+  // Not every error is our JSON envelope: the host returns HTML for 502s while
+  // the server wakes up, and the rate limiter replies in plain text.
+  const payload = await response.json().catch(() => null)
 
   if (!response.ok) {
-    const error = new Error(payload?.error?.message ?? 'Request failed')
+    const fallback =
+      response.status === 429
+        ? 'Too many requests. Please wait a moment and try again.'
+        : response.status >= 500
+          ? 'The server is unavailable right now. Please try again shortly.'
+          : 'Request failed'
+    const error = new Error(payload?.error?.message ?? fallback)
     error.status = response.status
     error.code = payload?.error?.code
     // Callers need this for structured errors such as SESSION_LIMIT_REACHED,
@@ -46,5 +54,5 @@ export async function apiRequest(path, { token, body, method = 'GET' } = {}) {
     throw error
   }
 
-  return payload.data
+  return payload?.data
 }
