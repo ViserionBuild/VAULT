@@ -22,6 +22,12 @@ This repository now includes the Phase 1 foundation from the PRD:
 - `/backend` – Express API and auth endpoints
 - `/PRD` – Product requirements document
 
+## Database
+
+- **Base schema:** `backend/src/db_service/queries/*.sql`, run in filename order on a new database.
+- **Migrations:** `supabase/migrations/*.sql`, applied in filename order (Supabase SQL editor or `supabase db push`). Each is safe to re-run (`if not exists`).
+- Every schema change ships as a new migration file in the same PR as the code that needs it, so the deployed code never runs ahead of the database.
+
 ## Local Development
 
 ### 1) Backend
