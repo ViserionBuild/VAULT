@@ -183,10 +183,11 @@ function createNotesRouter({ store, authMiddleware }) {
         payload.content = sanitizeNoteContent(payload.content)
       }
 
-      const note = await store.updateNote(req.params.id, req.user.id, payload)
+      // Also renames folders, which live in their own table.
+      const note = await store.updateNoteItem(req.params.id, req.user.id, payload)
       if (!note) {
         return res.status(404).json(
-          responseEnvelope(null, { code: 'NOT_FOUND', message: 'Note not found' }),
+          responseEnvelope(null, { code: 'NOT_FOUND', message: 'Note or folder not found' }),
         )
       }
       return res.json(responseEnvelope(note))
