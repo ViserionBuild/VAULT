@@ -2147,6 +2147,36 @@ class SupabaseStore {
     return (data ?? []).map(mapTagRow)
   }
 
+  // Live (not trashed) items per tag, in a fixed number of queries.
+  async getTagItemCounts(tagIds) {
+    const counts = new Map(tagIds.map((id) => [String(id), 0]))
+    if (tagIds.length === 0) return counts
+
+    const { data: links, error } = await this.client
+      .from('item_tags')
+      .select('item_id, tag_id')
+      .in('tag_id', tagIds.map(String))
+    if (error) throw error
+    if (!links || links.length === 0) return counts
+
+    const itemIds = [...new Set(links.map((link) => link.item_id))]
+    const [folders, files] = await Promise.all(
+      ['folders', 'files'].map((table) =>
+        this.client.from(table).select('id').in('id', itemIds).eq('is_deleted', false),
+      ),
+    )
+    if (folders.error) throw folders.error
+    if (files.error) throw files.error
+    const live = new Set([...(folders.data ?? []), ...(files.data ?? [])].map((row) => String(row.id)))
+
+    for (const link of links) {
+      if (live.has(String(link.item_id))) {
+        counts.set(String(link.tag_id), (counts.get(String(link.tag_id)) ?? 0) + 1)
+      }
+    }
+    return counts
+  }
+
   async getTagById(tagId, userId) {
     const { data, error } = await this.client
       .from('tags')
@@ -2173,6 +2203,9 @@ class SupabaseStore {
       .select('*')
       .single()
 
+    // PGRST116: no row matched (not found / not this user's). A duplicate
+    // name (23505) is rethrown for the route to report as a conflict.
+    if (error?.code === 'PGRST116') return null
     if (error) throw error
     return mapTagRow(data)
   }

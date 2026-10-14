@@ -11,6 +11,7 @@ import { TodoPage } from './pages/todo-page'
 import { FavoritesPage } from './pages/favorites-page'
 import { TrashPage } from './pages/trash-page'
 import { ProfilePage } from './pages/profile-page'
+import { TagsPage } from './pages/tags-page'
 
 export default function App() {
   return (
@@ -34,6 +35,7 @@ export default function App() {
         <Route path="todo/:listId" element={<TodoPage />} />
         <Route path="favorites" element={<FavoritesPage />} />
         <Route path="trash" element={<TrashPage />} />
+        <Route path="tags" element={<TagsPage />} />
         <Route path="profile" element={<ProfilePage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

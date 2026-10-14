@@ -1,13 +1,19 @@
 const { z } = require('zod')
 
+const tagName = z
+  .string()
+  .trim()
+  .min(1, 'Tag name is required')
+  .max(64, 'Tag names can be at most 64 characters')
+
 const createTagSchema = z.object({
-  name: z.string().min(1).max(64),
+  name: tagName,
   color: z.string().max(32).optional(),
   icon: z.string().max(64).optional(),
 })
 
 const updateTagSchema = z.object({
-  name: z.string().min(1).max(64).optional(),
+  name: tagName.optional(),
   color: z.string().max(32).optional(),
   icon: z.string().max(64).optional(),
 })
