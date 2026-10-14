@@ -8,9 +8,9 @@ import {
   ArrowDown,
 } from 'lucide-react'
 import defaultLinkIcon from '../../assets/default_link_icon.png'
-import { Badge } from '../ui/badge'
 import { FolderGlyph } from './folder-appearance'
 import { dragProps, dropHighlight, focusRing, keyboardProps } from '../items/item-interactions'
+import { TagChips } from '../tags/tag-chip'
 
 // Stored URLs may lack a scheme; without one the browser treats them as
 // relative paths on this site.
@@ -272,6 +272,7 @@ export function ResourcePreviewCard({ item, onOpen, onContextMenu, onFavorite, i
         {item.description && (
           <p className="line-clamp-2 text-xs text-muted-foreground/80">{item.description}</p>
         )}
+        <TagChips tags={item.tags} max={3} />
       </div>
     </div>
   )
@@ -387,7 +388,10 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
 
       {/* Name column: title, with the domain as secondary text */}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium">{item.title}</div>
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-sm font-medium">{item.title}</span>
+          <TagChips tags={item.tags} max={2} />
+        </div>
         {item.url ? (
           <a
             href={linkHref(item)}
@@ -404,17 +408,6 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
         ) : null}
       </div>
 
-      {/* Tags sit outside the sortable columns; hidden on narrow screens where
-          the aligned columns take priority. */}
-      {item.tags?.length > 0 && (
-        <div className="hidden shrink-0 items-center gap-1 xl:flex">
-          {item.tags.slice(0, 2).map((tag) => (
-            <Badge key={tag.id} style={{ borderColor: tag.color, color: tag.color }}>
-              {tag.name}
-            </Badge>
-          ))}
-        </div>
-      )}
 
       {/* Column widths mirror LIST_COLUMNS so rows align with the headers */}
       <span className="hidden w-24 shrink-0 text-xs text-muted-foreground sm:block">
@@ -565,6 +558,7 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                       )}
                     </IconLink>
                     <span className="truncate font-medium">{item.title}</span>
+                    <TagChips tags={item.tags} max={2} />
                   </div>
                 </td>
 

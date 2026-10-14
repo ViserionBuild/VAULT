@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   FolderPlus, Plus, RefreshCw,
-  Pencil, Trash2, Star, FolderInput, ExternalLink, CheckSquare
+  Pencil, Trash2, Star, FolderInput, ExternalLink, CheckSquare, Tag
 } from 'lucide-react'
 import { useApi } from '../hooks/use-api'
 import { useWorkspace } from '../contexts/workspace-context'
@@ -22,6 +22,7 @@ import { BulkActionBar } from '../components/resources/bulk-action-bar'
 import { MoveDialog } from '../components/resources/move-dialog'
 import { ContextMenu, useContextMenu } from '../components/ui/context-menu'
 import { useToast } from '../components/ui/toast'
+import { TagPickerDialog } from '../components/tags/tag-picker-dialog'
 import { canonicalUrl, parseWebUrl } from '../lib/url'
 
 export function ResourcesPage() {
@@ -51,6 +52,8 @@ export function ResourcesPage() {
   // Items being moved: one item from its menu, or the current selection.
   // Kept apart from the selection so cancelling a move leaves it untouched.
   const [moveIds, setMoveIds] = useState(null)
+  // Items whose tags are being edited (one from its menu, or the selection).
+  const [tagTargets, setTagTargets] = useState(null)
 
   // Selection, cleared whenever the folder changes (including via Back).
   const [selectedIds, setSelectedIds] = useState([])
@@ -101,7 +104,8 @@ export function ResourcesPage() {
   }, [view])
 
   // Paste a link anywhere on the page (outside a text field) to add it.
-  const anyDialogOpen = showAddResource || showCreateFolder || Boolean(editItem) || moveIds !== null
+  const anyDialogOpen =
+    showAddResource || showCreateFolder || Boolean(editItem) || moveIds !== null || tagTargets !== null
   useEffect(() => {
     const onPaste = (event) => {
       if (anyDialogOpen) return
@@ -421,6 +425,11 @@ export function ResourcesPage() {
         ]
       : []),
     {
+      label: 'Tags...',
+      icon: Tag,
+      onClick: () => setTagTargets([item]),
+    },
+    {
       label: 'Move to...',
       icon: FolderInput,
       onClick: () => setMoveIds([item.id]),
@@ -632,6 +641,7 @@ export function ResourcesPage() {
         count={selectedIds.length}
         onDelete={handleBulkDelete}
         onMove={() => setMoveIds(selectedIds)}
+        onTag={() => setTagTargets(items.filter((item) => selectedIds.includes(item.id)))}
         onClear={() => setSelectedIds([])}
       />
 
@@ -668,6 +678,18 @@ export function ResourcesPage() {
         item={editItem}
         onSubmit={handleEditItem}
       />
+      {tagTargets && (
+        <TagPickerDialog
+          open
+          items={tagTargets}
+          onClose={() => setTagTargets(null)}
+          onChange={(tagsByItem) =>
+            setItems((prev) =>
+              prev.map((item) => (tagsByItem.has(item.id) ? { ...item, tags: tagsByItem.get(item.id) } : item)),
+            )
+          }
+        />
+      )}
       <MoveDialog
         open={moveIds !== null}
         onClose={() => setMoveIds(null)}
