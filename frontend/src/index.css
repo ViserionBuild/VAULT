@@ -132,6 +132,24 @@ h3 {
   animation-name: slideInFromBottom;
 }
 
+/* Bottom sheet on phones, zoom-in dialog from sm up. */
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.sheet-in {
+  animation-name: sheetUp;
+  animation-duration: 260ms;
+}
+
+@media (min-width: 640px) {
+  .sheet-in {
+    animation-name: zoomIn95;
+    animation-duration: 200ms;
+  }
+}
+
 .animate-bounce {
   animation: bounce 2s ease infinite;
 }
@@ -207,4 +225,20 @@ h3 {
 .note-content:empty::before {
   content: attr(data-placeholder);
   color: hsl(var(--muted-foreground));
+}
+
+/* ── Phones ────────────────────────────────────────────────────── */
+html {
+  /* No grey flash over every tapped element on iOS/Android. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 767px) {
+  /* iOS zooms the whole page into any field under 16px when it is focused. */
+  input,
+  textarea,
+  select,
+  [contenteditable='true'] {
+    font-size: 16px !important;
+  }
 }

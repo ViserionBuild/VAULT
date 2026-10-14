@@ -44,5 +44,9 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // Screens without hover (phones, tablets). Controls revealed with
+    // group-hover would otherwise never appear there.
+    ({ addVariant }) => addVariant('touch', '@media (hover: none)'),
+  ],
 }

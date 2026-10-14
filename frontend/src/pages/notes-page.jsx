@@ -331,6 +331,8 @@ export function NotesPage() {
         </div>
       )}
 
+      {/* Touch screens show selection checkboxes only once something is selected. */}
+      <div className="group/sel" data-selecting={selectedIds.length > 0}>
       {/* Grid View */}
       {!loading && view === 'grid' && items.length > 0 && (
         <div className="space-y-6">
@@ -429,6 +431,7 @@ export function NotesPage() {
           />
         </div>
       )}
+      </div>
 
       {/* Folder rename only - notes are edited in NoteEditorDialog */}
       {editItem && editItem.type === 'folder' && (
@@ -485,15 +488,9 @@ export function NotesPage() {
       {/* Context Menu */}
       {contextMenu && (
         <ContextMenu
-          x={contextMenu.x ?? 0}
-          y={contextMenu.y ?? 0}
-          isOpen={contextMenu.isOpen ?? false}
+          items={getContextMenuItems(contextMenu.data)}
+          position={contextMenu}
           onClose={closeContextMenu}
-          items={
-            contextMenu.item
-              ? getContextMenuItems(contextMenu.item)
-              : []
-          }
         />
       )}
 

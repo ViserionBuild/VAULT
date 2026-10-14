@@ -91,8 +91,9 @@ export function NoteEditorDialog({ note, mode = 'edit', onClose, onSave, onSaved
     }
   }, [status, flush, readCurrent])
 
+  // Phones: fit between the app bar and tab bar (dvh tracks the browser UI).
   return (
-    <div className="flex h-[calc(100vh-8rem)] min-h-[24rem] flex-col overflow-hidden rounded-xl border border-border bg-background">
+    <div className="flex h-[calc(100dvh-9.5rem-env(safe-area-inset-bottom))] min-h-[20rem] flex-col md:h-[calc(100vh-8rem)] md:min-h-[24rem] overflow-hidden rounded-xl border border-border bg-background">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <input
           value={title}
