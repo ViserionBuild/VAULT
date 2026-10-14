@@ -187,10 +187,26 @@ export function ResourcesPage() {
     fetchItems()
   }
 
+  // Deleting moves items to Trash; offer an immediate way back.
+  const offerUndo = (itemIds) => {
+    toast.show({
+      message: itemIds.length === 1 ? 'Moved to Trash' : `${itemIds.length} items moved to Trash`,
+      action: {
+        label: 'Undo',
+        onClick: () =>
+          attempt(async () => {
+            await Promise.all(itemIds.map((id) => api(`/items/${id}/restore`, { method: 'POST' })))
+            fetchItems()
+          }, 'Could not restore. You can still restore from Trash.'),
+      },
+    })
+  }
+
   const handleDelete = (itemId) =>
     attempt(async () => {
       await api(`/items/${itemId}`, { method: 'DELETE' })
       fetchItems()
+      offerUndo([itemId])
     }, 'Could not delete. Please try again.')
 
   const handleFavorite = (itemId) =>
@@ -214,9 +230,11 @@ export function ResourcesPage() {
 
   const handleBulkDelete = () =>
     attempt(async () => {
-      await api('/items/bulk', { method: 'POST', body: { action: 'delete', itemIds: selectedIds } })
+      const deletedIds = selectedIds
+      await api('/items/bulk', { method: 'POST', body: { action: 'delete', itemIds: deletedIds } })
       setSelectedIds([])
       fetchItems()
+      offerUndo(deletedIds)
     }, 'Could not delete the selected items. Please try again.')
 
   const handleMove = async (targetParentId) => {
