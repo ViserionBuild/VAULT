@@ -3,7 +3,11 @@ import { createPortal } from 'react-dom'
 import { cn } from '../../lib/utils'
 import { useIsMobile } from '../../hooks/use-media-query'
 
-export function ContextMenu({ items, position, onClose }) {
+/**
+ * Right-click / "⋮" menu. `header` (optional) is shown above the actions,
+ * e.g. an item's details; without it, phones show the item's title.
+ */
+export function ContextMenu({ items, position, onClose, header }) {
   const menuRef = useRef(null)
   const [menuPos, setMenuPos] = useState(position)
   // A new position (menu reopened elsewhere) resets the placement; the effect
@@ -61,10 +65,14 @@ export function ContextMenu({ items, position, onClose }) {
           role="menu"
         >
           <div aria-hidden="true" className="mx-auto mb-2 mt-1 h-1 w-10 rounded-full bg-muted-foreground/30" />
-          {position.data?.title && (
-            <p className="truncate px-4 pb-2 text-sm font-medium text-muted-foreground">
-              {position.data.title}
-            </p>
+          {header ? (
+            <div className="mb-1 border-b border-border px-2 pb-2">{header}</div>
+          ) : (
+            position.data?.title && (
+              <p className="truncate px-4 pb-2 text-sm font-medium text-muted-foreground">
+                {position.data.title}
+              </p>
+            )
           )}
           {items.map((item, idx) =>
             item.separator ? (
@@ -106,9 +114,11 @@ export function ContextMenu({ items, position, onClose }) {
       className={cn(
         'fixed z-50 min-w-[180px] rounded-lg border border-border bg-background p-1 shadow-xl',
         'animate-in fade-in zoom-in-95',
+        header && 'w-72',
       )}
       style={{ top: menuPos.y, left: menuPos.x }}
     >
+      {header && <div className="mb-1 border-b border-border pb-1">{header}</div>}
       {items.map((item, idx) =>
         item.separator ? (
           <div key={idx} className="my-1 h-px bg-border" />
@@ -141,6 +151,13 @@ export function useContextMenu() {
 
   const handleContextMenu = (e, data) => {
     e.preventDefault()
+    // Opened from the keyboard (Enter on the "⋮" button) there's no pointer
+    // position, so open under the button instead of the screen's corner.
+    if (!e.clientX && !e.clientY && e.currentTarget?.getBoundingClientRect) {
+      const rect = e.currentTarget.getBoundingClientRect()
+      setContextMenu({ x: rect.left, y: rect.bottom + 4, data })
+      return
+    }
     setContextMenu({ x: e.clientX, y: e.clientY, data })
   }
 

@@ -19,6 +19,7 @@ import { CreateFolderDialog } from '../components/resources/create-folder-dialog
 import { AddResourceDialog } from '../components/resources/add-resource-dialog'
 import { AddMenu, canReadClipboard } from '../components/items/add-menu'
 import { EditItemDialog } from '../components/resources/edit-item-dialog'
+import { ItemDetailsHeader } from '../components/resources/item-details-header'
 import { BulkActionBar } from '../components/resources/bulk-action-bar'
 import { MoveDialog } from '../components/resources/move-dialog'
 import { ContextMenu, useContextMenu } from '../components/ui/context-menu'
@@ -713,6 +714,15 @@ export function ResourcesPage() {
           items={getContextMenuItems(contextMenu.data)}
           position={contextMenu}
           onClose={closeContextMenu}
+          header={
+            <ItemDetailsHeader
+              item={contextMenu.data}
+              onAddDescription={() => {
+                closeContextMenu()
+                setEditItem(contextMenu.data)
+              }}
+            />
+          }
         />
       )}
 
