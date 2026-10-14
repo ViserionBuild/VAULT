@@ -1,41 +1,69 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Star, RefreshCw, ExternalLink, Folder, Globe } from 'lucide-react'
+import { Star, RefreshCw, Globe, NotebookPen } from 'lucide-react'
 import { useApi } from '../hooks/use-api'
-import { Badge } from '../components/ui/badge'
+import { useWorkspace } from '../contexts/workspace-context'
+import { hostOf, useOpenItem } from '../hooks/use-open-item'
+import { Button } from '../components/ui/button'
+import { useToast } from '../components/ui/toast'
+import { FolderGlyph } from '../components/resources/folder-appearance'
+import { TagChips } from '../components/tags/tag-chip'
+
+// Resources and notes are starred separately; this page shows both.
+const KIND_LABEL = {
+  resource: { folder: 'Folder', url: 'Link' },
+  note: { folder: 'Notes folder', note: 'Note' },
+}
 
 export function FavoritesPage() {
   const api = useApi()
-  const [items, setItems] = useState([])
+  const toast = useToast()
+  const openItem = useOpenItem()
+  const { workspaces, activeWorkspace } = useWorkspace()
+  const [entries, setEntries] = useState([]) // { kind, item }
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
 
   const fetchFavorites = useCallback(async () => {
     setLoading(true)
+    setLoadError(false)
     try {
-      const data = await api('/items/favorites')
-      setItems(data)
+      const [resources, notes] = await Promise.all([api('/items/favorites'), api('/notes/favorites')])
+      setEntries(
+        [
+          ...(resources ?? []).map((item) => ({ kind: 'resource', item })),
+          ...(notes ?? []).map((item) => ({ kind: 'note', item })),
+        ].sort((a, b) => String(b.item.updatedAt).localeCompare(String(a.item.updatedAt))),
+      )
     } catch {
-      // ignore
+      setLoadError(true)
     } finally {
       setLoading(false)
     }
   }, [api])
 
   useEffect(() => {
-    fetchFavorites()
+    queueMicrotask(() => {
+      void fetchFavorites()
+    })
   }, [fetchFavorites])
 
-  const handleUnfavorite = async (id) => {
-    await api(`/items/${id}/favorite`, { method: 'POST' })
-    fetchFavorites()
-  }
-
-  const handleOpen = (item) => {
-    if (item.url) {
-      window.open(item.url, '_blank', 'noopener,noreferrer')
+  const unfavorite = async ({ kind, item }) => {
+    setEntries((prev) => prev.filter((entry) => entry.item.id !== item.id))
+    try {
+      await api(`/${kind === 'note' ? 'notes' : 'items'}/${item.id}/favorite`, { method: 'POST' })
+    } catch {
+      toast.error('Could not update favorite. Please try again.')
+      fetchFavorites()
     }
   }
 
-  if (loading) {
+  // Favorites span workspaces; name the workspace when it isn't the open one.
+  const workspaceName = (item) =>
+    activeWorkspace && String(item.workspaceId) !== String(activeWorkspace.id)
+      ? workspaces.find((ws) => String(ws.id) === String(item.workspaceId))?.name
+      : null
+
+  if (loading && entries.length === 0) {
     return (
       <div className="flex items-center justify-center py-20">
         <RefreshCw className="h-6 w-6 animate-spin text-primary" />
@@ -46,75 +74,94 @@ export function FavoritesPage() {
   return (
     <section className="space-y-4">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+        <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight">
           <Star className="h-6 w-6 text-yellow-400" fill="currentColor" />
           Favorites
         </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Your starred items across all folders and workspaces.
+        <p className="mt-1 text-sm text-muted-foreground">
+          Starred resources and notes from every folder and workspace.
         </p>
       </div>
 
-      {items.length === 0 ? (
+      {loadError ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <h3 className="text-lg font-semibold">Couldn't load your favorites</h3>
+          <Button className="mt-4" variant="outline" onClick={fetchFavorites}>
+            <RefreshCw className="mr-1.5 h-4 w-4" /> Retry
+          </Button>
+        </div>
+      ) : entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="mb-4 rounded-2xl bg-muted/50 p-6">
             <Star className="h-12 w-12 text-muted-foreground/30" />
           </div>
           <h3 className="text-lg font-semibold">No favorites yet</h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            Star items in Resources to see them here for quick access.
+            Star resources or notes to keep them one tap away here.
           </p>
         </div>
       ) : (
         <div className="space-y-2">
-          {items.map((item) => (
-            <div
-              key={item.id}
-              className="group flex items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 transition-all hover:shadow-md hover:border-primary/30 cursor-pointer"
-              onClick={() => handleOpen(item)}
-            >
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/50">
-                {item.type === 'folder' ? (
-                  <Folder className="h-5 w-5 text-primary/70" />
-                ) : item.icon ? (
-                  <img src={item.icon} alt="" className="h-5 w-5" onError={(e) => { e.target.style.display = 'none' }} />
-                ) : (
-                  <Globe className="h-5 w-5 text-muted-foreground/50" />
-                )}
-              </div>
-
-              <div className="flex-1 min-w-0">
-                <h3 className="font-medium text-sm truncate">{item.title}</h3>
-                {item.url && (
-                  <p className="flex items-center gap-1 text-xs text-muted-foreground/60 truncate">
-                    <ExternalLink className="h-3 w-3 shrink-0" />
-                    {new URL(item.url).hostname}
-                  </p>
-                )}
-              </div>
-
-              {item.tags?.length > 0 && (
-                <div className="hidden sm:flex items-center gap-1">
-                  {item.tags.slice(0, 2).map((tag) => (
-                    <Badge key={tag.id} style={{ borderColor: tag.color, color: tag.color }}>
-                      {tag.name}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-
-              <button
-                className="text-yellow-400 hover:text-muted-foreground transition-colors"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleUnfavorite(item.id)
+          {entries.map((entry) => {
+            const { kind, item } = entry
+            const otherWorkspace = workspaceName(item)
+            return (
+              <div
+                key={`${kind}-${item.id}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => openItem(item, kind)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && e.target === e.currentTarget) openItem(item, kind)
                 }}
-                title="Remove from favorites"
+                className="group flex cursor-pointer items-center gap-3 rounded-lg border border-border bg-background px-4 py-3 outline-none transition-all hover:border-primary/30 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary"
               >
-                <Star className="h-4 w-4" fill="currentColor" />
-              </button>
-            </div>
-          ))}
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/50">
+                  {item.type === 'folder' ? (
+                    <FolderGlyph icon={item.icon} color={item.color || item.metadata?.color} size="md" />
+                  ) : kind === 'note' ? (
+                    <NotebookPen className="h-5 w-5 text-muted-foreground/70" strokeWidth={1.5} />
+                  ) : item.icon?.startsWith('http') ? (
+                    <img
+                      src={item.icon}
+                      alt=""
+                      className="h-5 w-5"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none'
+                      }}
+                    />
+                  ) : (
+                    <Globe className="h-5 w-5 text-muted-foreground/50" />
+                  )}
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <h3 className="truncate text-sm font-medium">{item.title}</h3>
+                    <TagChips tags={item.tags} max={2} />
+                  </div>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {KIND_LABEL[kind][item.type] ?? 'Item'}
+                    {item.url ? ` · ${hostOf(item.url)}` : ''}
+                    {otherWorkspace ? ` · in ${otherWorkspace}` : ''}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  className="rounded-md p-2 text-yellow-400 transition-colors hover:bg-muted hover:text-muted-foreground"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    unfavorite(entry)
+                  }}
+                  aria-label={`Remove ${item.title} from favorites`}
+                  title="Remove from favorites"
+                >
+                  <Star className="h-4 w-4" fill="currentColor" />
+                </button>
+              </div>
+            )
+          })}
         </div>
       )}
     </section>

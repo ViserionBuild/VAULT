@@ -32,7 +32,7 @@ export function ResourcesPage() {
 
   const [items, setItems] = useState([])
   const [breadcrumbs, setBreadcrumbs] = useState([])
-  const { currentFolder, openFolder } = useFolderParam(activeWorkspace?.id)
+  const { currentFolder, openFolder, searchParams, setSearchParams } = useFolderParam(activeWorkspace?.id)
   const [view, setView] = useState(() => localStorage.getItem('vault-view') ?? 'grid')
   // Sort is remembered across visits, like the view.
   const { sortBy, sortOrder, changeSort, toggleColumn } = usePersistentSort('vault-resource-sort')
@@ -102,6 +102,26 @@ export function ResourcesPage() {
   useEffect(() => {
     localStorage.setItem('vault-view', view)
   }, [view])
+
+  // ?new=folder|link (from the dashboard's quick actions) opens that dialog,
+  // then drops the parameter so Back or refresh don't reopen it.
+  const newIntent = searchParams.get('new')
+  useEffect(() => {
+    if (!newIntent) return
+    queueMicrotask(() => {
+      if (newIntent === 'folder') setShowCreateFolder(true)
+      else if (newIntent === 'link') openAddResource()
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          next.delete('new')
+          return next
+        },
+        { replace: true },
+      )
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newIntent])
 
   // Paste a link anywhere on the page (outside a text field) to add it.
   const anyDialogOpen =

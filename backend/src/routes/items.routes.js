@@ -209,6 +209,24 @@ function createItemsRouter({ store, authMiddleware, metadataService }) {
     }
   })
 
+  // Dashboard: workspace-wide counts and recent resources/notes.
+  router.get('/overview', authMiddleware, async (req, res) => {
+    try {
+      const { workspaceId } = req.query
+      if (!workspaceId) {
+        return res.status(400).json(
+          responseEnvelope(null, { code: 'VALIDATION_ERROR', message: 'workspaceId query parameter is required' }),
+        )
+      }
+      const overview = await store.getWorkspaceOverview({ userId: req.user.id, workspaceId })
+      return res.json(responseEnvelope(overview))
+    } catch {
+      return res.status(500).json(
+        responseEnvelope(null, { code: 'INTERNAL_ERROR', message: 'Failed to load overview' }),
+      )
+    }
+  })
+
   router.get('/favorites', authMiddleware, async (req, res) => {
     const items = await store.getFavoriteItems(req.user.id)
     const enriched = await enrichItemsWithTags(items)
