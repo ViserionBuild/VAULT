@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import {
   ExternalLink,
   Star,
@@ -75,10 +76,12 @@ export function ResourceCard({ item, onOpen, onContextMenu, onFavorite, isSelect
 }
 
 function TileControls({ item, onFavorite, onContextMenu, isSelected, onSelect, tone = 'default' }) {
+  // Over a preview image, controls sit on small chips so they stay readable.
+  const chip = tone === 'onImage' ? 'bg-background/85 shadow-sm backdrop-blur-sm' : ''
   return (
     <>
       <div
-        className={`absolute left-1 top-1 z-10 transition-opacity ${
+        className={`absolute left-1 top-1 z-10 flex rounded transition-opacity ${chip} ${tone === 'onImage' ? 'p-1' : ''} ${
           isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 touch:invisible group-data-[selecting=true]/sel:visible group-data-[selecting=true]/sel:opacity-100'
         }`}
         onClick={(e) => e.stopPropagation()}
@@ -92,13 +95,13 @@ function TileControls({ item, onFavorite, onContextMenu, isSelected, onSelect, t
         />
       </div>
 
-      <div className="absolute right-0.5 top-0.5 z-10 flex items-center">
+      <div className={`absolute z-10 flex items-center gap-0.5 ${tone === 'onImage' ? 'right-1.5 top-1.5' : 'right-0.5 top-0.5'}`}>
         <button
           className={`rounded-full p-1 transition-all ${
             item.isFavorite
               ? 'text-yellow-400'
               : 'opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-yellow-400 touch:hidden'
-          } ${tone === 'onTint' ? 'hover:bg-background/60' : 'hover:bg-muted'}`}
+          } ${chip} ${tone === 'onTint' ? 'hover:bg-background/60' : 'hover:bg-muted'}`}
           onClick={(e) => {
             e.stopPropagation()
             onFavorite(item.id)
@@ -110,7 +113,7 @@ function TileControls({ item, onFavorite, onContextMenu, isSelected, onSelect, t
         <button
           className={`rounded-full p-1 touch:p-1.5 text-muted-foreground opacity-0 transition-all group-hover:opacity-100 touch:opacity-100 hover:text-foreground ${
             tone === 'onTint' ? 'hover:bg-background/60' : 'hover:bg-muted'
-          }`}
+          } ${chip}`}
           onClick={(e) => {
             e.stopPropagation()
             onContextMenu(e, item)
@@ -197,6 +200,82 @@ function FileTile({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelec
       <span className="line-clamp-2 w-full text-center text-[11px] leading-tight">
         {item.title}
       </span>
+    </div>
+  )
+}
+
+function displayHost(item) {
+  try {
+    return new URL(linkHref(item)).hostname.replace(/^www\./, '')
+  } catch {
+    return item.url ?? ''
+  }
+}
+
+// Cards view: a link's preview image (og:image) above its title, domain and
+// description. Links without one get a tinted panel with their favicon.
+export function ResourcePreviewCard({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect, dnd }) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const showImage = item.thumbnail && !imageFailed
+  const favicon = item.icon?.startsWith('http') ? item.icon : null
+  const host = displayHost(item)
+
+  return (
+    <div
+      className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border bg-background transition-all hover:-translate-y-0.5 hover:shadow-lg ${
+        isSelected ? 'border-primary ring-2 ring-primary/30' : 'border-border hover:border-primary/40'
+      }`}
+      onClick={() => onOpen(item)}
+      onContextMenu={(e) => onContextMenu(e, item)}
+      title={item.title}
+      {...dragProps(dnd, item)}
+    >
+      <TileControls
+        item={item}
+        onFavorite={onFavorite}
+        onContextMenu={onContextMenu}
+        isSelected={isSelected}
+        onSelect={onSelect}
+        tone="onImage"
+      />
+
+      <IconLink item={item} className="block aspect-[1.91/1] w-full overflow-hidden bg-muted">
+        {showImage ? (
+          <img
+            src={item.thumbnail}
+            alt=""
+            loading="lazy"
+            // Some image hosts refuse hotlinked requests that carry a referrer.
+            referrerPolicy="no-referrer"
+            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            onError={() => setImageFailed(true)}
+          />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/15 to-muted">
+            <img src={favicon ?? defaultLinkIcon} alt="" className="h-10 w-10 rounded-lg opacity-80" />
+          </span>
+        )}
+      </IconLink>
+
+      <div className="flex min-w-0 flex-1 flex-col gap-1 p-3">
+        <div className="flex min-w-0 items-center gap-2">
+          {favicon && (
+            <img
+              src={favicon}
+              alt=""
+              className="h-4 w-4 shrink-0"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none'
+              }}
+            />
+          )}
+          <span className="line-clamp-2 text-sm font-medium leading-snug">{item.title}</span>
+        </div>
+        {host && <span className="truncate text-xs text-muted-foreground">{host}</span>}
+        {item.description && (
+          <p className="line-clamp-2 text-xs text-muted-foreground/80">{item.description}</p>
+        )}
+      </div>
     </div>
   )
 }

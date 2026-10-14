@@ -1,8 +1,9 @@
-import { LayoutGrid, List, StretchHorizontal } from 'lucide-react'
+import { LayoutGrid, List, StretchHorizontal, GalleryVerticalEnd } from 'lucide-react'
 import { Button } from '../ui/button'
 
 const views = [
   { key: 'grid', icon: LayoutGrid, label: 'Grid' },
+  { key: 'cards', icon: GalleryVerticalEnd, label: 'Cards' },
   { key: 'list', icon: List, label: 'List' },
   { key: 'table', icon: StretchHorizontal, label: 'Table' },
 ]

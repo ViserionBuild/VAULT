@@ -11,7 +11,7 @@ import { Breadcrumbs } from '../components/resources/breadcrumbs'
 import { ViewToggle } from '../components/resources/view-toggle'
 import { SortMenu } from '../components/resources/sort-menu'
 import { isItemDrag, useItemDragDrop } from '../components/resources/use-item-drag-drop'
-import { ResourceCard, ResourceListItem, ResourceListHeader, ResourceTable } from '../components/resources/resource-views'
+import { ResourceCard, ResourcePreviewCard, ResourceListItem, ResourceListHeader, ResourceTable } from '../components/resources/resource-views'
 import { ResourceSearch } from '../components/resources/resource-search'
 import { CreateFolderDialog } from '../components/resources/create-folder-dialog'
 import { AddResourceDialog } from '../components/resources/add-resource-dialog'
@@ -536,8 +536,9 @@ export function ResourcesPage() {
 
       {/* Touch screens show selection checkboxes only once something is selected. */}
       <div className="group/sel" data-selecting={selectedIds.length > 0}>
-      {/* Grid View - folders and files in separate sections, like Drive */}
-      {view === 'grid' && items.length > 0 && (
+      {/* Grid and Cards views - folders and files in separate sections, like
+          Drive. Cards differ only in showing files as preview cards. */}
+      {(view === 'grid' || view === 'cards') && items.length > 0 && (
         <div className="space-y-6">
           {gridFolders.length > 0 && (
             <div>
@@ -576,9 +577,17 @@ export function ResourcesPage() {
                 addLabel="Add resource"
                 onAdd={() => openAddResource()}
               />
-              <div className="grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]">
-                {gridFiles.map((item) => (
-                  <ResourceCard
+              <div
+                className={
+                  view === 'cards'
+                    ? 'grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr))]'
+                    : 'grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]'
+                }
+              >
+                {gridFiles.map((item) => {
+                  const FileView = view === 'cards' ? ResourcePreviewCard : ResourceCard
+                  return (
+                  <FileView
                     key={item.id}
                     item={item}
                     onOpen={handleOpen}
@@ -588,7 +597,8 @@ export function ResourcesPage() {
                     onSelect={handleSelect}
                     dnd={dnd}
                   />
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
