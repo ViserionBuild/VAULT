@@ -96,7 +96,9 @@ export function ResourcesPage() {
   }, [api, activeWorkspace, currentFolder, sortBy, sortOrder])
 
   useEffect(() => {
-    fetchItems()
+    queueMicrotask(() => {
+      void fetchItems()
+    })
   }, [fetchItems])
 
   useEffect(() => {
@@ -692,12 +694,15 @@ export function ResourcesPage() {
           openFolder(item.parentId ?? null)
         }}
       />
-      <EditItemDialog
-        open={Boolean(editItem)}
-        onClose={() => setEditItem(null)}
-        item={editItem}
-        onSubmit={handleEditItem}
-      />
+      {editItem && (
+        <EditItemDialog
+          key={editItem.id}
+          open
+          onClose={() => setEditItem(null)}
+          item={editItem}
+          onSubmit={handleEditItem}
+        />
+      )}
       {tagTargets && (
         <TagPickerDialog
           open

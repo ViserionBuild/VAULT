@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Dialog } from '../ui/dialog'
 import { Input } from '../ui/input'
 import { Button } from '../ui/button'
@@ -6,11 +6,13 @@ import { DEFAULT_FOLDER_COLOR, FolderAppearancePicker } from './folder-appearanc
 
 
 export function EditItemDialog({ open, onClose, item, onSubmit }) {
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [url, setUrl] = useState('')
-  const [icon, setIcon] = useState('')
-  const [color, setColor] = useState(DEFAULT_FOLDER_COLOR)
+  // Initialised from the item; the parent remounts this dialog per item (key).
+  const [title, setTitle] = useState(item?.title ?? '')
+  const [description, setDescription] = useState(item?.description ?? '')
+  const [url, setUrl] = useState(item?.url ?? '')
+  // Legacy default emoji is shown as the plain folder glyph.
+  const [icon, setIcon] = useState(item?.type === 'folder' && item.icon === '📁' ? '' : item?.icon ?? '')
+  const [color, setColor] = useState(item?.color || item?.metadata?.color || DEFAULT_FOLDER_COLOR)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -20,16 +22,6 @@ export function EditItemDialog({ open, onClose, item, onSubmit }) {
     onClose()
   }
 
-  useEffect(() => {
-    if (item) {
-      setTitle(item.title ?? '')
-      setDescription(item.description ?? '')
-      setUrl(item.url ?? '')
-      // Legacy default emoji is shown as the plain folder glyph.
-      setIcon(item.type === 'folder' && item.icon === '📁' ? '' : item.icon ?? '')
-      setColor(item.color || item.metadata?.color || DEFAULT_FOLDER_COLOR)
-    }
-  }, [item])
 
   const handleSubmit = async (e) => {
     e.preventDefault()

@@ -1,10 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { cn } from '../../lib/utils'
 import { useIsMobile } from '../../hooks/use-media-query'
 
 export function ContextMenu({ items, position, onClose }) {
   const menuRef = useRef(null)
   const [menuPos, setMenuPos] = useState(position)
+  // A new position (menu reopened elsewhere) resets the placement; the effect
+  // below then nudges it on-screen once measured.
+  const [placedFor, setPlacedFor] = useState(position)
+  if (position && position !== placedFor) {
+    setPlacedFor(position)
+    setMenuPos(position)
+  }
   const isMobile = useIsMobile()
 
   useEffect(() => {
@@ -22,14 +30,11 @@ export function ContextMenu({ items, position, onClose }) {
   }, [onClose])
 
   useEffect(() => {
-    if (!position) return
-    setMenuPos(position)
-  }, [position])
-
-  useEffect(() => {
     if (!position || !menuRef.current) return
 
-    const menuRect = menuRef.current.getBoundingClientRect()
+    // offsetWidth/Height ignore the zoom-in animation's transform, which
+    // would otherwise under-measure the menu and let it spill off-screen.
+    const menuRect = { width: menuRef.current.offsetWidth, height: menuRef.current.offsetHeight }
     const padding = 8
     const maxLeft = window.innerWidth - menuRect.width - padding
     const maxTop = window.innerHeight - menuRect.height - padding
@@ -45,8 +50,10 @@ export function ContextMenu({ items, position, onClose }) {
 
   // Phones: an action sheet from the bottom with full-width, thumb-sized rows,
   // instead of a small popup anchored under the finger.
+  // Rendered into <body>: inside the page, layout styles such as a parent's
+  // space-y margin would offset the fixed-position menu.
   if (isMobile) {
-    return (
+    return createPortal(
       <div className="fixed inset-0 z-50 flex items-end bg-black/50 animate-in fade-in">
         <div
           ref={menuRef}
@@ -88,11 +95,12 @@ export function ContextMenu({ items, position, onClose }) {
             Cancel
           </button>
         </div>
-      </div>
+      </div>,
+      document.body,
     )
   }
 
-  return (
+  return createPortal(
     <div
       ref={menuRef}
       className={cn(
@@ -123,7 +131,8 @@ export function ContextMenu({ items, position, onClose }) {
           </button>
         ),
       )}
-    </div>
+    </div>,
+    document.body,
   )
 }
 

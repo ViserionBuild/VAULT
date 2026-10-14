@@ -42,13 +42,15 @@ export function WorkspaceProvider({ children }) {
       return
     }
 
-    if (isAuthenticated) {
-      fetchWorkspaces()
-    } else {
-      setWorkspaces([])
-      setActiveWorkspace(null)
-      setLoading(false)
-    }
+    queueMicrotask(() => {
+      if (isAuthenticated) {
+        void fetchWorkspaces()
+      } else {
+        setWorkspaces([])
+        setActiveWorkspace(null)
+        setLoading(false)
+      }
+    })
   }, [isAuthenticated, ready, accessToken, fetchWorkspaces])
 
   const createWorkspace = useCallback(
