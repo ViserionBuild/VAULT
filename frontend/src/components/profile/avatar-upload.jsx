@@ -1,39 +1,19 @@
 import { useRef, useState } from 'react'
 import { Camera, Trash2, Loader2 } from 'lucide-react'
 import { Avatar } from '../ui/avatar'
+import { AvatarCropDialog } from './avatar-crop-dialog'
 
 const MAX_SOURCE_BYTES = 8 * 1024 * 1024 // reject huge originals before decoding
-const OUTPUT_SIZE = 256 // square, adequate for every size we display
 
-/**
- * Downscale and centre-crop to a square, then encode as a data URI.
- *
- * Done client-side so a 5MB phone photo becomes ~30KB before it ever reaches
- * the API — no storage bucket required, and the request stays small.
- */
-function processImage(file) {
+function readAsDataUrl(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onerror = () => reject(new Error('Could not read that file.'))
     reader.onload = () => {
+      // Decode once up front so a broken file fails here, not in the cropper.
       const image = new Image()
       image.onerror = () => reject(new Error('That file is not a readable image.'))
-      image.onload = () => {
-        const canvas = document.createElement('canvas')
-        canvas.width = OUTPUT_SIZE
-        canvas.height = OUTPUT_SIZE
-        const ctx = canvas.getContext('2d')
-
-        // Centre-crop the largest square that fits, so nothing is stretched.
-        const side = Math.min(image.width, image.height)
-        const sx = (image.width - side) / 2
-        const sy = (image.height - side) / 2
-        ctx.drawImage(image, sx, sy, side, side, 0, 0, OUTPUT_SIZE, OUTPUT_SIZE)
-
-        // JPEG keeps the payload small; transparency is not meaningful once
-        // the image is masked into a circle.
-        resolve(canvas.toDataURL('image/jpeg', 0.85))
-      }
+      image.onload = () => resolve(reader.result)
       image.src = reader.result
     }
     reader.readAsDataURL(file)
@@ -44,6 +24,9 @@ export function AvatarUpload({ user, profile, value, onChange, disabled }) {
   const inputRef = useRef(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // The picked photo, while the user positions it. The crop is downscaled to
+  // a small JPEG in the browser, so no storage bucket is needed.
+  const [cropSrc, setCropSrc] = useState(null)
 
   const pick = async (event) => {
     const file = event.target.files?.[0]
@@ -63,7 +46,7 @@ export function AvatarUpload({ user, profile, value, onChange, disabled }) {
 
     setBusy(true)
     try {
-      onChange(await processImage(file))
+      setCropSrc(await readAsDataUrl(file))
     } catch (err) {
       setError(err.message ?? 'Could not process that image.')
     } finally {
@@ -118,6 +101,18 @@ export function AvatarUpload({ user, profile, value, onChange, disabled }) {
           <Trash2 className="h-3 w-3" /> Remove photo
         </button>
       ) : null}
+
+      {cropSrc && (
+        <AvatarCropDialog
+          src={cropSrc}
+          onCancel={() => setCropSrc(null)}
+          onChooseAnother={() => inputRef.current?.click()}
+          onSave={(dataUrl) => {
+            setCropSrc(null)
+            onChange(dataUrl)
+          }}
+        />
+      )}
 
       {error ? <p className="max-w-[14rem] text-center text-xs text-red-500">{error}</p> : null}
     </div>
