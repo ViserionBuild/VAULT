@@ -352,6 +352,42 @@ export function ResourcesPage() {
       offerUndo(deletedIds)
     }, 'Could not delete the selected items. Please try again.')
 
+  // Page-level keys (when not typing and no dialog is open): arrows move
+  // between items, Ctrl/Cmd+A selects all, Delete removes the selection,
+  // Escape clears it.
+  // Latest values for the listener, without re-subscribing it every render.
+  const keyActionsRef = useRef(null)
+  useEffect(() => {
+    keyActionsRef.current = { items, selectedIds, handleBulkDelete }
+  })
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (anyDialogOpen || contextMenu) return
+      if (event.target.closest?.('input, textarea, select, [contenteditable="true"]')) return
+      const { items: current, selectedIds: selected, handleBulkDelete: deleteSelected } = keyActionsRef.current
+
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+        event.preventDefault()
+        setSelectedIds(current.map((item) => item.id))
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length > 0) {
+        event.preventDefault()
+        deleteSelected()
+      } else if (event.key === 'Escape' && selected.length > 0) {
+        setSelectedIds([])
+      } else if (['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(event.key)) {
+        const nodes = [...document.querySelectorAll('main [data-item-id]')]
+        if (nodes.length === 0) return
+        event.preventDefault()
+        const index = nodes.indexOf(document.activeElement)
+        const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
+        const next = index === -1 ? 0 : Math.min(nodes.length - 1, Math.max(0, index + step))
+        nodes[next].focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [anyDialogOpen, contextMenu])
+
   const handleMove = async (targetParentId) => {
     await api('/items/bulk', {
       method: 'POST',

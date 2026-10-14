@@ -43,6 +43,24 @@ function IconLink({ item, className, children }) {
 // dragged, and folders also accept drops.
 const dragProps = (dnd, item) =>
   dnd ? { ...dnd.itemProps(item), ...(item.type === 'folder' ? dnd.dropProps(item.id) : {}) } : {}
+// Keyboard: every item is focusable; Enter opens it, Space toggles selection.
+// (Arrow keys, Ctrl/Cmd+A, Delete and Escape are handled by the page.)
+const keyboardProps = (item, onOpen, toggleSelect) => ({
+  tabIndex: 0,
+  'data-item-id': item.id,
+  onKeyDown: (event) => {
+    if (event.target !== event.currentTarget) return
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      onOpen(item)
+    } else if (event.key === ' ') {
+      event.preventDefault()
+      toggleSelect()
+    }
+  },
+})
+const focusRing = 'outline-none focus-visible:ring-2 focus-visible:ring-primary'
+
 const dropHighlight = (dnd, item) =>
   item.type === 'folder' && dnd?.isDropTarget(item.id) ? 'ring-2 ring-primary bg-primary/10' : ''
 
@@ -133,11 +151,12 @@ function FolderTile({ item, color, onOpen, onContextMenu, onFavorite, isSelected
     <div
       className={`group relative flex cursor-pointer flex-col items-center gap-0.5 rounded border border-transparent px-1 pb-1 pt-1.5 transition-colors ${
         isSelected ? 'border-primary/40 bg-primary/10' : 'hover:bg-muted/60'
-      } ${dropHighlight(dnd, item)}`}
+      } ${dropHighlight(dnd, item)} ${focusRing}`}
       onClick={() => onOpen(item)}
       onContextMenu={(e) => onContextMenu(e, item)}
       title={item.title}
       {...dragProps(dnd, item)}
+      {...keyboardProps(item, onOpen, () => onSelect(item.id))}
     >
       <TileControls
         item={item}
@@ -164,11 +183,12 @@ function FileTile({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelec
     <div
       className={`group relative flex cursor-pointer flex-col items-center gap-0.5 rounded border border-transparent px-1 pb-1 pt-1.5 transition-colors ${
         isSelected ? 'border-primary/40 bg-primary/10' : 'hover:bg-muted/60'
-      } ${dropHighlight(dnd, item)}`}
+      } ${dropHighlight(dnd, item)} ${focusRing}`}
       onClick={() => onOpen(item)}
       onContextMenu={(e) => onContextMenu(e, item)}
       title={item.title}
       {...dragProps(dnd, item)}
+      {...keyboardProps(item, onOpen, () => onSelect(item.id))}
     >
       <TileControls
         item={item}
@@ -224,11 +244,12 @@ export function ResourcePreviewCard({ item, onOpen, onContextMenu, onFavorite, i
     <div
       className={`group relative flex cursor-pointer flex-col overflow-hidden rounded-xl border bg-background transition-all hover:-translate-y-0.5 hover:shadow-lg ${
         isSelected ? 'border-primary ring-2 ring-primary/30' : 'border-border hover:border-primary/40'
-      }`}
+      } ${focusRing}`}
       onClick={() => onOpen(item)}
       onContextMenu={(e) => onContextMenu(e, item)}
       title={item.title}
       {...dragProps(dnd, item)}
+      {...keyboardProps(item, onOpen, () => onSelect(item.id))}
     >
       <TileControls
         item={item}
@@ -351,10 +372,11 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
     <div
       className={`group flex cursor-pointer items-center gap-3 border-b border-border/50 px-3 py-2 transition-colors last:border-b-0 ${
         isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'
-      } ${dropHighlight(dnd, item)}`}
+      } ${dropHighlight(dnd, item)} ${focusRing}`}
       onClick={() => onOpen(item)}
       onContextMenu={(e) => onContextMenu(e, item)}
       {...dragProps(dnd, item)}
+      {...keyboardProps(item, onOpen, () => onSelect(item.id))}
     >
       <span className="flex w-4 shrink-0 items-center" onClick={(e) => e.stopPropagation()}>
         <input
@@ -520,10 +542,13 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                 key={item.id}
                 className={`group cursor-pointer border-b border-border/50 transition-colors last:border-b-0 ${
                   isSelected ? 'bg-primary/10' : 'hover:bg-muted/50'
-                } ${dropHighlight(dnd, item)}`}
+                } ${dropHighlight(dnd, item)} ${focusRing}`}
                 onClick={() => onOpen(item)}
                 onContextMenu={(e) => onContextMenu(e, item)}
                 {...dragProps(dnd, item)}
+                {...keyboardProps(item, onOpen, () =>
+                  onSelect(isSelected ? selectedIds.filter((id) => id !== item.id) : [...selectedIds, item.id]),
+                )}
               >
                 <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                   <input
