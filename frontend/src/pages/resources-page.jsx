@@ -19,6 +19,7 @@ import { BulkActionBar } from '../components/resources/bulk-action-bar'
 import { MoveDialog } from '../components/resources/move-dialog'
 import { ContextMenu, useContextMenu } from '../components/ui/context-menu'
 import { useToast } from '../components/ui/toast'
+import { canonicalUrl, parseWebUrl } from '../lib/url'
 
 export function ResourcesPage() {
   const api = useApi()
@@ -61,6 +62,12 @@ export function ResourcesPage() {
   // Dialogs
   const [showCreateFolder, setShowCreateFolder] = useState(false)
   const [showAddResource, setShowAddResource] = useState(false)
+  // Pre-filled URL for the add dialog; a new key remounts it to apply.
+  const [addPrefill, setAddPrefill] = useState({ url: '', key: 0 })
+  const openAddResource = (url = '') => {
+    setAddPrefill((prev) => ({ url, key: prev.key + 1 }))
+    setShowAddResource(true)
+  }
   const [editItem, setEditItem] = useState(null)
   // Items being moved: one item from its menu, or the current selection.
   // Kept apart from the selection so cancelling a move leaves it untouched.
@@ -120,6 +127,35 @@ export function ResourcesPage() {
   useEffect(() => {
     localStorage.setItem('vault-view', view)
   }, [view])
+
+  // Paste a link anywhere on the page (outside a text field) to add it.
+  const anyDialogOpen = showAddResource || showCreateFolder || Boolean(editItem) || moveIds !== null
+  useEffect(() => {
+    const onPaste = (event) => {
+      if (anyDialogOpen) return
+      const target = event.target
+      if (target.closest?.('input, textarea, [contenteditable="true"]')) return
+      const text = event.clipboardData?.getData('text') ?? ''
+      if (!parseWebUrl(text)) return
+      event.preventDefault()
+      openAddResource(text.trim())
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [anyDialogOpen])
+
+  // An already-saved item with the same link, for the add dialog's warning.
+  const findExisting = useCallback(
+    async (url) => {
+      const canonical = canonicalUrl(url)
+      if (!canonical || !activeWorkspace) return null
+      const host = parseWebUrl(url).hostname.replace(/^www\./, '')
+      const params = new URLSearchParams({ q: host, workspaceId: activeWorkspace.id })
+      const data = await api(`/items/search?${params}`)
+      return (data.items ?? []).find((item) => item.type === 'url' && canonicalUrl(item.url) === canonical) ?? null
+    },
+    [api, activeWorkspace],
+  )
 
   // ─── Actions ───────────────────────────────────────────────────
   // One-click actions update the list immediately, then confirm with the
@@ -389,7 +425,7 @@ export function ResourcesPage() {
               <span className="hidden xs:inline">Folder</span>
               <span className="xs:hidden">New</span>
             </Button>
-            <Button size="sm" onClick={() => setShowAddResource(true)}>
+            <Button size="sm" onClick={() => openAddResource()}>
               <Plus className="mr-1.5 h-4 w-4" />
               <span className="hidden xs:inline">Resource</span>
               <span className="xs:hidden">Add</span>
@@ -439,7 +475,7 @@ export function ResourcesPage() {
             <Button variant="outline" onClick={() => setShowCreateFolder(true)}>
               <FolderPlus className="mr-1.5 h-4 w-4" /> New Folder
             </Button>
-            <Button onClick={() => setShowAddResource(true)}>
+            <Button onClick={() => openAddResource()}>
               <Plus className="mr-1.5 h-4 w-4" /> Add Resource
             </Button>
           </div>
@@ -485,7 +521,7 @@ export function ResourcesPage() {
                 selectedIds={selectedIds}
                 onToggleGroup={handleToggleGroup}
                 addLabel="Add resource"
-                onAdd={() => setShowAddResource(true)}
+                onAdd={() => openAddResource()}
               />
               <div className="grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]">
                 {gridFiles.map((item) => (
@@ -572,9 +608,16 @@ export function ResourcesPage() {
         onSubmit={handleCreateFolder}
       />
       <AddResourceDialog
+        key={addPrefill.key}
         open={showAddResource}
+        initialUrl={addPrefill.url}
         onClose={() => setShowAddResource(false)}
         onSubmit={handleAddResource}
+        findExisting={findExisting}
+        onShowExisting={(item) => {
+          setShowAddResource(false)
+          openFolder(item.parentId ?? null)
+        }}
       />
       <EditItemDialog
         open={Boolean(editItem)}
