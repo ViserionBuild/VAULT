@@ -17,6 +17,7 @@ import { ResourceCard, ResourcePreviewCard, ResourceListItem, ResourceListHeader
 import { ResourceSearch } from '../components/resources/resource-search'
 import { CreateFolderDialog } from '../components/resources/create-folder-dialog'
 import { AddResourceDialog } from '../components/resources/add-resource-dialog'
+import { AddMenu } from '../components/resources/add-menu'
 import { EditItemDialog } from '../components/resources/edit-item-dialog'
 import { BulkActionBar } from '../components/resources/bulk-action-bar'
 import { MoveDialog } from '../components/resources/move-dialog'
@@ -141,6 +142,18 @@ export function ResourcesPage() {
     document.addEventListener('paste', onPaste)
     return () => document.removeEventListener('paste', onPaste)
   }, [anyDialogOpen])
+
+  // "Paste link" in the add menu. Phones can't paste onto the page itself.
+  const handlePasteLink = async () => {
+    let text = ''
+    try {
+      text = (await navigator.clipboard.readText()).trim()
+    } catch {
+      // Permission refused; fall through to an empty dialog.
+    }
+    if (text && !parseWebUrl(text)) toast.show({ message: 'No link on the clipboard. Enter one instead.' })
+    openAddResource(parseWebUrl(text) ? text : '')
+  }
 
   // An already-saved item with the same link, for the add dialog's warning.
   const findExisting = useCallback(
@@ -480,16 +493,14 @@ export function ResourcesPage() {
           <div className="flex flex-wrap items-center gap-2">
             <ViewToggle activeView={view} onViewChange={setView} />
             <SortMenu sortBy={sortBy} sortOrder={sortOrder} onChange={changeSort} />
-            <Button size="sm" variant="outline" onClick={() => setShowCreateFolder(true)}>
-              <FolderPlus className="mr-1.5 h-4 w-4" />
-              <span className="hidden xs:inline">Folder</span>
-              <span className="xs:hidden">New</span>
-            </Button>
-            <Button size="sm" onClick={() => openAddResource()}>
-              <Plus className="mr-1.5 h-4 w-4" />
-              <span className="hidden xs:inline">Resource</span>
-              <span className="xs:hidden">Add</span>
-            </Button>
+            <AddMenu
+              onNewFolder={() => setShowCreateFolder(true)}
+              onAddLink={() => openAddResource()}
+              onPasteLink={handlePasteLink}
+              locationName={breadcrumbs.at(-1)?.title ?? activeWorkspace?.name ?? 'Resources'}
+              disabled={anyDialogOpen}
+              hideFab={selectedIds.length > 0}
+            />
           </div>
         </div>
 
