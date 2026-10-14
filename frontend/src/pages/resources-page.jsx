@@ -13,7 +13,7 @@ import { useFolderParam } from '../hooks/use-folder-param'
 import { usePersistentSort } from '../hooks/use-persistent-sort'
 import { useItemShortcuts } from '../hooks/use-item-shortcuts'
 import { isItemDrag, useItemDragDrop } from '../components/items/use-item-drag-drop'
-import { ResourceCard, ResourcePreviewCard, ResourceListItem, ResourceListHeader, ResourceTable } from '../components/resources/resource-views'
+import { ResourceCard, ResourcePreviewCard, ResourceTable } from '../components/resources/resource-views'
 import { ResourceSearch } from '../components/resources/resource-search'
 import { CreateFolderDialog } from '../components/resources/create-folder-dialog'
 import { AddResourceDialog } from '../components/resources/add-resource-dialog'
@@ -27,6 +27,8 @@ import { useToast } from '../components/ui/toast'
 import { TagPickerDialog } from '../components/tags/tag-picker-dialog'
 import { canonicalUrl, parseWebUrl } from '../lib/url'
 
+const RESOURCE_VIEWS = ['grid', 'cards', 'table']
+
 export function ResourcesPage() {
   const api = useApi()
   const toast = useToast()
@@ -35,7 +37,11 @@ export function ResourcesPage() {
   const [items, setItems] = useState([])
   const [breadcrumbs, setBreadcrumbs] = useState([])
   const { currentFolder, openFolder, searchParams, setSearchParams } = useFolderParam(activeWorkspace?.id)
-  const [view, setView] = useState(() => localStorage.getItem('vault-view') ?? 'grid')
+  // The list view was folded into the table; a saved "list" opens the table.
+  const [view, setView] = useState(() => {
+    const saved = localStorage.getItem('vault-view') ?? 'grid'
+    return RESOURCE_VIEWS.includes(saved) ? saved : 'table'
+  })
   // Sort is remembered across visits, like the view.
   const { sortBy, sortOrder, changeSort, toggleColumn } = usePersistentSort('vault-resource-sort')
   const [loading, setLoading] = useState(false)
@@ -403,13 +409,6 @@ export function ResourcesPage() {
     handleOpen(item)
   }
 
-  // Select-all state, shared by the list header and the table header.
-  const allSelected = items.length > 0 && selectedIds.length === items.length
-  const someSelected = selectedIds.length > 0 && !allSelected
-  const handleToggleAll = () => {
-    setSelectedIds(allSelected ? [] : items.map((item) => item.id))
-  }
-
   // Grid view groups folders above files, preserving the active sort order.
   const gridFolders = items.filter((item) => item.type === 'folder')
   const gridFiles = items.filter((item) => item.type !== 'folder')
@@ -522,7 +521,7 @@ export function ResourcesPage() {
 
           {/* Actions wrap rather than overflow on narrow screens */}
           <div className="flex flex-wrap items-center gap-2">
-            <ViewToggle activeView={view} onViewChange={setView} />
+            <ViewToggle activeView={view} onViewChange={setView} views={RESOURCE_VIEWS} />
             <SortMenu sortBy={sortBy} sortOrder={sortOrder} onChange={changeSort} />
             <AddMenu
               options={addOptions}
@@ -651,32 +650,6 @@ export function ResourcesPage() {
               </div>
             </div>
           )}
-        </div>
-      )}
-
-      {/* List View */}
-      {view === 'list' && items.length > 0 && (
-        <div className="rounded-lg border border-border">
-          <ResourceListHeader
-            onSort={handleSort}
-            sortBy={sortBy}
-            sortOrder={sortOrder}
-            allSelected={allSelected}
-            someSelected={someSelected}
-            onToggleAll={handleToggleAll}
-          />
-          {items.map((item) => (
-            <ResourceListItem
-              key={item.id}
-              item={item}
-              onOpen={handleOpen}
-              onContextMenu={handleContextMenu}
-              onFavorite={handleFavorite}
-              isSelected={selectedIds.includes(item.id)}
-              onSelect={handleSelect}
-              dnd={dnd}
-            />
-          ))}
         </div>
       )}
 
