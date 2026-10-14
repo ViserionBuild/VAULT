@@ -12,7 +12,7 @@ import {
 import { useAuth } from '../contexts/auth-context'
 import { Button } from '../components/ui/button'
 import { ActiveSessionsDialog } from '../components/session/active-sessions-dialog'
-import vaultLogo from '../assets/vault-logo.webp'
+import vaultLogo from '../assets/vault_icon_bw.svg'
 import { apiRequest } from '../lib/api'
 
 export function LoginPage() {
@@ -107,7 +107,7 @@ export function LoginPage() {
           <img
             src={vaultLogo}
             alt="VAULT"
-            className="mb-3 h-20 w-20 rounded-2xl shadow-lg shadow-fuchsia-500/20 ring-1 ring-white/10"
+            className="mb-3 h-20 w-20 rounded-full shadow-lg dark:ring-1 dark:ring-white/25"
           />
           <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
           <p className="mt-1 text-sm text-muted-foreground">

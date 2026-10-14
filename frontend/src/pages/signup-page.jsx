@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/auth-context'
 import { Button } from '../components/ui/button'
-import vaultLogo from '../assets/vault-logo.webp'
+import vaultLogo from '../assets/vault_icon_bw.svg'
 
 export function SignupPage() {
   const { signup, loading } = useAuth()
@@ -28,7 +28,7 @@ export function SignupPage() {
         <img
           src={vaultLogo}
           alt="VAULT"
-          className="mx-auto h-16 w-16 rounded-2xl shadow-lg shadow-fuchsia-500/20 ring-1 ring-white/10"
+          className="mx-auto h-16 w-16 rounded-full shadow-lg dark:ring-1 dark:ring-white/25"
         />
         <h1 className="text-center text-xl font-semibold">Create your VAULT account</h1>
         <input className="w-full rounded-md border bg-background p-2" name="name" placeholder="Name" required minLength={2} />
