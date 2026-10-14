@@ -9,7 +9,9 @@ import { useWorkspace } from '../contexts/workspace-context'
 import { Button } from '../components/ui/button'
 import { Breadcrumbs } from '../components/resources/breadcrumbs'
 import { ViewToggle } from '../components/resources/view-toggle'
-import { ResourceCard, ResourceListItem, ResourceListHeader, ResourceTable } from '../components/resources/resource-views'
+import { SortMenu } from '../components/resources/sort-menu'
+import { isItemDrag, useItemDragDrop } from '../components/resources/use-item-drag-drop'
+import { ResourceCard, ResourcePreviewCard, ResourceListItem, ResourceListHeader, ResourceTable } from '../components/resources/resource-views'
 import { ResourceSearch } from '../components/resources/resource-search'
 import { CreateFolderDialog } from '../components/resources/create-folder-dialog'
 import { AddResourceDialog } from '../components/resources/add-resource-dialog'
@@ -18,6 +20,7 @@ import { BulkActionBar } from '../components/resources/bulk-action-bar'
 import { MoveDialog } from '../components/resources/move-dialog'
 import { ContextMenu, useContextMenu } from '../components/ui/context-menu'
 import { useToast } from '../components/ui/toast'
+import { canonicalUrl, parseWebUrl } from '../lib/url'
 
 export function ResourcesPage() {
   const api = useApi()
@@ -35,14 +38,37 @@ export function ResourcesPage() {
     [setSearchParams],
   )
   const [view, setView] = useState(() => localStorage.getItem('vault-view') ?? 'grid')
-  const [sortBy, setSortBy] = useState('position')
-  const [sortOrder, setSortOrder] = useState('asc')
+  // Sort is remembered across visits, like the view.
+  const [{ sortBy, sortOrder }, setSort] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('vault-resource-sort'))
+      if (saved?.sortBy && saved?.sortOrder) return saved
+    } catch {
+      // Fall through to the default.
+    }
+    return { sortBy: 'position', sortOrder: 'asc' }
+  })
+  const changeSort = (nextBy, nextOrder) => {
+    const next = { sortBy: nextBy, sortOrder: nextOrder }
+    setSort(next)
+    try {
+      localStorage.setItem('vault-resource-sort', JSON.stringify(next))
+    } catch {
+      // Not persisted; still applies for this visit.
+    }
+  }
   const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState(false)
 
   // Dialogs
   const [showCreateFolder, setShowCreateFolder] = useState(false)
   const [showAddResource, setShowAddResource] = useState(false)
+  // Pre-filled URL for the add dialog; a new key remounts it to apply.
+  const [addPrefill, setAddPrefill] = useState({ url: '', key: 0 })
+  const openAddResource = (url = '') => {
+    setAddPrefill((prev) => ({ url, key: prev.key + 1 }))
+    setShowAddResource(true)
+  }
   const [editItem, setEditItem] = useState(null)
   // Items being moved: one item from its menu, or the current selection.
   // Kept apart from the selection so cancelling a move leaves it untouched.
@@ -102,6 +128,35 @@ export function ResourcesPage() {
   useEffect(() => {
     localStorage.setItem('vault-view', view)
   }, [view])
+
+  // Paste a link anywhere on the page (outside a text field) to add it.
+  const anyDialogOpen = showAddResource || showCreateFolder || Boolean(editItem) || moveIds !== null
+  useEffect(() => {
+    const onPaste = (event) => {
+      if (anyDialogOpen) return
+      const target = event.target
+      if (target.closest?.('input, textarea, [contenteditable="true"]')) return
+      const text = event.clipboardData?.getData('text') ?? ''
+      if (!parseWebUrl(text)) return
+      event.preventDefault()
+      openAddResource(text.trim())
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [anyDialogOpen])
+
+  // An already-saved item with the same link, for the add dialog's warning.
+  const findExisting = useCallback(
+    async (url) => {
+      const canonical = canonicalUrl(url)
+      if (!canonical || !activeWorkspace) return null
+      const host = parseWebUrl(url).hostname.replace(/^www\./, '')
+      const params = new URLSearchParams({ q: host, workspaceId: activeWorkspace.id })
+      const data = await api(`/items/search?${params}`)
+      return (data.items ?? []).find((item) => item.type === 'url' && canonicalUrl(item.url) === canonical) ?? null
+    },
+    [api, activeWorkspace],
+  )
 
   // ─── Actions ───────────────────────────────────────────────────
   // One-click actions update the list immediately, then confirm with the
@@ -231,6 +286,57 @@ export function ResourcesPage() {
       toast.success('Link details refreshed')
     }, 'Could not refresh link details. Please try again.')
 
+  // Drag-and-drop move. Applied at once, with Undo moving everything back.
+  const moveByDrag = (itemIds, targetFolderId) =>
+    attempt(async () => {
+      const sourceFolderId = currentFolder
+      if (String(targetFolderId ?? '') === String(sourceFolderId ?? '')) return
+      removeLocally(itemIds)
+      setSelectedIds((prev) => prev.filter((id) => !itemIds.includes(id)))
+      await api('/items/bulk', {
+        method: 'POST',
+        body: { action: 'move', itemIds, targetParentId: targetFolderId },
+      })
+      const targetName = targetFolderId
+        ? (items.find((item) => item.id === targetFolderId) ?? breadcrumbs.find((c) => c.id === targetFolderId))?.title ?? 'folder'
+        : 'Resources'
+      toast.show({
+        message: `Moved ${itemIds.length === 1 ? '1 item' : `${itemIds.length} items`} to ${targetName}`,
+        action: {
+          label: 'Undo',
+          onClick: () =>
+            attempt(async () => {
+              await api('/items/bulk', {
+                method: 'POST',
+                body: { action: 'move', itemIds, targetParentId: sourceFolderId },
+              })
+              fetchItems()
+            }, 'Could not undo the move.'),
+        },
+      })
+    }, 'Could not move. Please try again.')
+
+  const dnd = useItemDragDrop({ selectedIds, onMove: moveByDrag })
+
+  // A link dragged in from another tab or app opens the add dialog with it.
+  const dropLinkProps = {
+    onDragOver: (event) => {
+      if (isItemDrag(event) || !event.dataTransfer.types.includes('text/uri-list')) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+    },
+    onDrop: (event) => {
+      if (isItemDrag(event)) return
+      const link = event.dataTransfer
+        .getData('text/uri-list')
+        .split(/\r?\n/)
+        .find((line) => line && !line.startsWith('#'))
+      if (!link || !parseWebUrl(link)) return
+      event.preventDefault()
+      openAddResource(link)
+    },
+  }
+
   const handleSelect = (itemId) => {
     setSelectedIds((prev) =>
       prev.includes(itemId) ? prev.filter((id) => id !== itemId) : [...prev, itemId],
@@ -245,6 +351,42 @@ export function ResourcesPage() {
       await api('/items/bulk', { method: 'POST', body: { action: 'delete', itemIds: deletedIds } })
       offerUndo(deletedIds)
     }, 'Could not delete the selected items. Please try again.')
+
+  // Page-level keys (when not typing and no dialog is open): arrows move
+  // between items, Ctrl/Cmd+A selects all, Delete removes the selection,
+  // Escape clears it.
+  // Latest values for the listener, without re-subscribing it every render.
+  const keyActionsRef = useRef(null)
+  useEffect(() => {
+    keyActionsRef.current = { items, selectedIds, handleBulkDelete }
+  })
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if (anyDialogOpen || contextMenu) return
+      if (event.target.closest?.('input, textarea, select, [contenteditable="true"]')) return
+      const { items: current, selectedIds: selected, handleBulkDelete: deleteSelected } = keyActionsRef.current
+
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+        event.preventDefault()
+        setSelectedIds(current.map((item) => item.id))
+      } else if ((event.key === 'Delete' || event.key === 'Backspace') && selected.length > 0) {
+        event.preventDefault()
+        deleteSelected()
+      } else if (event.key === 'Escape' && selected.length > 0) {
+        setSelectedIds([])
+      } else if (['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'].includes(event.key)) {
+        const nodes = [...document.querySelectorAll('main [data-item-id]')]
+        if (nodes.length === 0) return
+        event.preventDefault()
+        const index = nodes.indexOf(document.activeElement)
+        const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : -1
+        const next = index === -1 ? 0 : Math.min(nodes.length - 1, Math.max(0, index + step))
+        nodes[next].focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => document.removeEventListener('keydown', onKeyDown)
+  }, [anyDialogOpen, contextMenu])
 
   const handleMove = async (targetParentId) => {
     await api('/items/bulk', {
@@ -300,14 +442,9 @@ export function ResourcesPage() {
     )
   }
 
-  const handleSort = (field) => {
-    if (sortBy === field) {
-      setSortOrder((o) => (o === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setSortBy(field)
-      setSortOrder('asc')
-    }
-  }
+  // List/table header click: toggle direction on the active column.
+  const handleSort = (field) =>
+    changeSort(field, sortBy === field && sortOrder === 'asc' ? 'desc' : 'asc')
 
   // ─── Context Menu Items ────────────────────────────────────────
   const getContextMenuItems = (item) => [
@@ -358,24 +495,25 @@ export function ResourcesPage() {
 
   // ─── Render ────────────────────────────────────────────────────
   return (
-    <section className="space-y-4">
+    <section className="space-y-4" {...dropLinkProps}>
       {/* Header */}
       <div className="flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold tracking-tight">Resources</h1>
-            <Breadcrumbs breadcrumbs={breadcrumbs} onNavigate={handleNavigate} />
+            <Breadcrumbs breadcrumbs={breadcrumbs} onNavigate={handleNavigate} dnd={dnd} />
           </div>
 
           {/* Actions wrap rather than overflow on narrow screens */}
           <div className="flex flex-wrap items-center gap-2">
             <ViewToggle activeView={view} onViewChange={setView} />
+            <SortMenu sortBy={sortBy} sortOrder={sortOrder} onChange={changeSort} />
             <Button size="sm" variant="outline" onClick={() => setShowCreateFolder(true)}>
               <FolderPlus className="mr-1.5 h-4 w-4" />
               <span className="hidden xs:inline">Folder</span>
               <span className="xs:hidden">New</span>
             </Button>
-            <Button size="sm" onClick={() => setShowAddResource(true)}>
+            <Button size="sm" onClick={() => openAddResource()}>
               <Plus className="mr-1.5 h-4 w-4" />
               <span className="hidden xs:inline">Resource</span>
               <span className="xs:hidden">Add</span>
@@ -425,7 +563,7 @@ export function ResourcesPage() {
             <Button variant="outline" onClick={() => setShowCreateFolder(true)}>
               <FolderPlus className="mr-1.5 h-4 w-4" /> New Folder
             </Button>
-            <Button onClick={() => setShowAddResource(true)}>
+            <Button onClick={() => openAddResource()}>
               <Plus className="mr-1.5 h-4 w-4" /> Add Resource
             </Button>
           </div>
@@ -434,8 +572,9 @@ export function ResourcesPage() {
 
       {/* Touch screens show selection checkboxes only once something is selected. */}
       <div className="group/sel" data-selecting={selectedIds.length > 0}>
-      {/* Grid View - folders and files in separate sections, like Drive */}
-      {view === 'grid' && items.length > 0 && (
+      {/* Grid and Cards views - folders and files in separate sections, like
+          Drive. Cards differ only in showing files as preview cards. */}
+      {(view === 'grid' || view === 'cards') && items.length > 0 && (
         <div className="space-y-6">
           {gridFolders.length > 0 && (
             <div>
@@ -457,6 +596,7 @@ export function ResourcesPage() {
                     onFavorite={handleFavorite}
                     isSelected={selectedIds.includes(item.id)}
                     onSelect={handleSelect}
+                    dnd={dnd}
                   />
                 ))}
               </div>
@@ -471,11 +611,19 @@ export function ResourcesPage() {
                 selectedIds={selectedIds}
                 onToggleGroup={handleToggleGroup}
                 addLabel="Add resource"
-                onAdd={() => setShowAddResource(true)}
+                onAdd={() => openAddResource()}
               />
-              <div className="grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]">
-                {gridFiles.map((item) => (
-                  <ResourceCard
+              <div
+                className={
+                  view === 'cards'
+                    ? 'grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr))]'
+                    : 'grid gap-1 [grid-template-columns:repeat(auto-fill,minmax(84px,1fr))]'
+                }
+              >
+                {gridFiles.map((item) => {
+                  const FileView = view === 'cards' ? ResourcePreviewCard : ResourceCard
+                  return (
+                  <FileView
                     key={item.id}
                     item={item}
                     onOpen={handleOpen}
@@ -483,8 +631,10 @@ export function ResourcesPage() {
                     onFavorite={handleFavorite}
                     isSelected={selectedIds.includes(item.id)}
                     onSelect={handleSelect}
+                    dnd={dnd}
                   />
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -511,6 +661,7 @@ export function ResourcesPage() {
               onFavorite={handleFavorite}
               isSelected={selectedIds.includes(item.id)}
               onSelect={handleSelect}
+              dnd={dnd}
             />
           ))}
         </div>
@@ -529,6 +680,7 @@ export function ResourcesPage() {
           onSort={handleSort}
           sortBy={sortBy}
           sortOrder={sortOrder}
+          dnd={dnd}
         />
         </div>
       )}
@@ -558,9 +710,16 @@ export function ResourcesPage() {
         onSubmit={handleCreateFolder}
       />
       <AddResourceDialog
+        key={addPrefill.key}
         open={showAddResource}
+        initialUrl={addPrefill.url}
         onClose={() => setShowAddResource(false)}
         onSubmit={handleAddResource}
+        findExisting={findExisting}
+        onShowExisting={(item) => {
+          setShowAddResource(false)
+          openFolder(item.parentId ?? null)
+        }}
       />
       <EditItemDialog
         open={Boolean(editItem)}

@@ -1,10 +1,28 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Dialog } from '../ui/dialog'
 import { Input } from '../ui/input'
 import { Button } from '../ui/button'
 
-export function AddResourceDialog({ open, onClose, onSubmit }) {
-  const [url, setUrl] = useState('')
+/**
+ * `initialUrl` pre-fills the field (paste-to-add); the parent remounts the
+ * dialog with a new key to apply it. `findExisting(url)` resolves to an
+ * already-saved item with that link, or null.
+ */
+export function AddResourceDialog({ open, onClose, onSubmit, initialUrl = '', findExisting, onShowExisting }) {
+  const [url, setUrl] = useState(initialUrl)
+  const [existing, setExisting] = useState(null)
+  const checkIdRef = useRef(0)
+
+  // Warn, without blocking, when this link is already saved somewhere.
+  useEffect(() => {
+    const checkId = ++checkIdRef.current
+    if (!open || !findExisting || !url.trim()) return
+    const timer = setTimeout(async () => {
+      const found = await findExisting(url).catch(() => null)
+      if (checkId === checkIdRef.current) setExisting(found)
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [open, url, findExisting])
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [loading, setLoading] = useState(false)
@@ -29,6 +47,7 @@ export function AddResourceDialog({ open, onClose, onSubmit }) {
         description: description.trim(),
       })
       setUrl('')
+      setExisting(null)
       setTitle('')
       setDescription('')
       onClose()
@@ -47,7 +66,10 @@ export function AddResourceDialog({ open, onClose, onSubmit }) {
           <label className="mb-1.5 block text-sm font-medium">URL *</label>
           <Input
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => {
+              setUrl(e.target.value)
+              setExisting(null)
+            }}
             placeholder="example.com/article"
             // Plain text, not type="url": that rejects "github.com" without a
             // scheme. The server adds https:// when it is missing.
@@ -59,9 +81,27 @@ export function AddResourceDialog({ open, onClose, onSubmit }) {
             autoFocus
             required
           />
-          <p className="mt-1 text-xs text-muted-foreground">
-            Metadata (title, description, favicon) will be auto-fetched.
-          </p>
+          {existing ? (
+            <div className="mt-2 flex items-start gap-2 rounded-md border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-700 dark:text-yellow-300">
+              <span className="min-w-0 flex-1">
+                Already saved as <strong className="font-semibold">{existing.title}</strong>
+                {existing.path ? ` in ${existing.path}` : ''}. You can still add it again.
+              </span>
+              {onShowExisting && (
+                <button
+                  type="button"
+                  className="shrink-0 font-semibold underline-offset-2 hover:underline"
+                  onClick={() => onShowExisting(existing)}
+                >
+                  Show
+                </button>
+              )}
+            </div>
+          ) : (
+            <p className="mt-1 text-xs text-muted-foreground">
+              Metadata (title, description, favicon) will be auto-fetched.
+            </p>
+          )}
         </div>
 
         <div>

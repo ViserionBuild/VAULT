@@ -1,11 +1,16 @@
 import { ChevronRight, Home } from 'lucide-react'
 
-export function Breadcrumbs({ breadcrumbs, onNavigate }) {
+// `dnd` (optional, from useItemDragDrop) makes each crumb a drop target, so
+// items can be dragged up to a parent folder or Root.
+export function Breadcrumbs({ breadcrumbs, onNavigate, dnd }) {
+  const highlight = (folderId) => (dnd?.isDropTarget(folderId) ? 'ring-2 ring-primary bg-primary/10' : '')
+
   return (
     <nav className="flex items-center gap-1 text-sm text-muted-foreground overflow-x-auto pb-1">
       <button
         onClick={() => onNavigate(null)}
-        className="flex items-center gap-1 rounded-md px-2 py-1 hover:bg-muted hover:text-foreground transition-colors shrink-0"
+        className={`flex items-center gap-1 rounded-md px-2 py-1 hover:bg-muted hover:text-foreground transition-colors shrink-0 ${highlight(null)}`}
+        {...dnd?.dropProps(null)}
       >
         <Home className="h-3.5 w-3.5" />
         <span>Root</span>
@@ -19,7 +24,8 @@ export function Breadcrumbs({ breadcrumbs, onNavigate }) {
               idx === breadcrumbs.length - 1
                 ? 'font-medium text-foreground'
                 : 'hover:bg-muted hover:text-foreground'
-            }`}
+            } ${highlight(crumb.id)}`}
+            {...dnd?.dropProps(crumb.id)}
           >
             {crumb.title}
           </button>
