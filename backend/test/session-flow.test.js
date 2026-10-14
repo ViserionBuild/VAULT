@@ -39,8 +39,9 @@ function createMemoryStore() {
       return users.find((user) => user.id === id) ?? null
     },
     async storeRefreshToken({ userId, token, userAgent, ipAddress }) {
+      const id = crypto.randomUUID()
       tokens.push({
-        id: crypto.randomUUID(),
+        id,
         token_hash: hash(token),
         user_id: userId,
         revoked_at: null,
@@ -50,6 +51,7 @@ function createMemoryStore() {
         user_agent: userAgent ?? null,
         ip_address: ipAddress ?? null,
       })
+      return id
     },
     async listActiveSessions(userId) {
       return tokens
@@ -68,9 +70,19 @@ function createMemoryStore() {
       row.last_used_at = now()
       return true
     },
-    async rotateRefreshToken({ oldToken, newToken, userId, userAgent, ipAddress }) {
-      await this.revokeRefreshToken(oldToken)
-      await this.storeRefreshToken({ userId, token: newToken, userAgent, ipAddress })
+    // Same row, new token: the session keeps its id.
+    async rotateRefreshToken({ oldToken, newToken, userAgent, ipAddress }) {
+      const row = tokens.find((r) => r.token_hash === hash(oldToken) && !r.revoked_at)
+      row.token_hash = hash(newToken)
+      row.expires_at = now() + REFRESH_TOKEN_TTL_SECONDS * 1000
+      row.last_used_at = now()
+      row.user_agent = userAgent ?? null
+      row.ip_address = ipAddress ?? null
+      return row.id
+    },
+    async isSessionActive(sessionId) {
+      const row = tokens.find((r) => r.id === sessionId)
+      return Boolean(row && !row.revoked_at && row.expires_at > now())
     },
     async findValidRefreshToken(token) {
       return findLive(token) ?? null
@@ -78,6 +90,7 @@ function createMemoryStore() {
     async revokeRefreshToken(token) {
       const row = tokens.find((r) => r.token_hash === hash(token) && !r.revoked_at)
       if (row) row.revoked_at = now()
+      return row?.id ?? null
     },
   }
 }
@@ -240,6 +253,51 @@ describe('login / logout session flow', () => {
     expect((await laptop.heartbeat()).statusCode).toBe(200)
     expect((await laptop.me()).statusCode).toBe(200)
     expect((await laptop.logout()).statusCode).toBe(200)
+  })
+
+  it('stops accepting the access token as soon as the session logs out', async () => {
+    const { app } = setup()
+    const laptop = device(app)
+    await laptop.signup('a@example.com')
+    expect((await laptop.me()).statusCode).toBe(200)
+
+    await laptop.logout()
+    const after = await laptop.me()
+    expect(after.statusCode).toBe(401)
+    expect(after.body.error.code).toBe('SESSION_ENDED')
+  })
+
+  it('locks out a session ended from another device immediately', async () => {
+    const { app, store } = setup()
+    const email = 'a@example.com'
+    const first = device(app, 'Mozilla/5.0 (Windows NT 10.0) Firefox/131.0')
+    const signup = await first.signup(email)
+    expect((await first.me()).statusCode).toBe(200)
+
+    const [session] = await store.listActiveSessions(signup.body.data.user.id)
+    const other = device(app)
+    await other.login(email)
+    await request(app)
+      .delete(`/api/v1/auth/sessions/${session.id}`)
+      .set('Authorization', `Bearer ${other.state.accessToken}`)
+
+    expect((await first.me()).statusCode).toBe(401)
+    expect((await other.me()).statusCode).toBe(200)
+  })
+
+  it('keeps the session id across refreshes, so other tabs keep working', async () => {
+    const { app, store } = setup()
+    const laptop = device(app)
+    const signup = await laptop.signup('a@example.com')
+    const [before] = await store.listActiveSessions(signup.body.data.user.id)
+    const otherTabToken = laptop.state.accessToken
+
+    await laptop.refresh()
+    const [after] = await store.listActiveSessions(signup.body.data.user.id)
+    expect(after.id).toBe(before.id)
+
+    const res = await request(app).get('/api/v1/auth/me').set('Authorization', `Bearer ${otherTabToken}`)
+    expect(res.statusCode).toBe(200)
   })
 
   it('rejects a wrong password without revealing the session limit', async () => {

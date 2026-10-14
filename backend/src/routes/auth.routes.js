@@ -10,6 +10,7 @@ const {
 } = require('../services/auth-service')
 const { describeDevice, clientIp } = require('../utils/device')
 const { responseEnvelope } = require('../utils/response')
+const { invalidateSession } = require('../middleware/auth')
 
 // Mirrors the hashing in the store so a session row can be matched to the
 // caller's own refresh cookie without ever storing the raw token.
@@ -105,6 +106,8 @@ function createAuthRouter({
         sessionId: req.params.sessionId,
         userId,
       })
+      // Its access tokens stop working now, not when they expire.
+      invalidateSession(req.params.sessionId)
 
       if (!revoked) {
         return res.status(404).json(
@@ -142,14 +145,14 @@ function createAuthRouter({
         )
       }
 
-      const accessToken = authService.issueAccessToken(user)
       const refreshToken = authService.issueRefreshToken(user)
-      await store.storeRefreshToken({
+      const sessionId = await store.storeRefreshToken({
         userId: user.id,
         token: refreshToken,
         userAgent: req.headers['user-agent'],
         ipAddress: clientIp(req),
       })
+      const accessToken = authService.issueAccessToken(user, sessionId)
       // The frontend can't read this cookie cross-site, so the token is also
       // returned in the body for it to echo back in the x-csrf-token header.
       const csrfToken = authService.issueCsrfToken()
@@ -252,14 +255,14 @@ function createAuthRouter({
         }
       }
 
-      const accessToken = authService.issueAccessToken(user)
       const refreshToken = authService.issueRefreshToken(user)
-      await store.storeRefreshToken({
+      const sessionId = await store.storeRefreshToken({
         userId: user.id,
         token: refreshToken,
         userAgent: req.headers['user-agent'],
         ipAddress: clientIp(req),
       })
+      const accessToken = authService.issueAccessToken(user, sessionId)
       // The frontend can't read this cookie cross-site, so the token is also
       // returned in the body for it to echo back in the x-csrf-token header.
       const csrfToken = authService.issueCsrfToken()
@@ -342,19 +345,19 @@ function createAuthRouter({
         )
       }
 
-      const nextAccessToken = authService.issueAccessToken(user)
       const nextRefreshToken = authService.issueRefreshToken(user)
       // The frontend can't read this cookie cross-site, so the token is also
       // returned in the body for it to echo back in the x-csrf-token header.
       const csrfToken = authService.issueCsrfToken()
       authService.setCsrfCookie(res, csrfToken)
-      await store.rotateRefreshToken({
+      const sessionId = await store.rotateRefreshToken({
         userAgent: req.headers['user-agent'],
         ipAddress: clientIp(req),
         oldToken: currentRefreshToken,
         newToken: nextRefreshToken,
         userId: user.id,
       })
+      const nextAccessToken = authService.issueAccessToken(user, sessionId)
       authService.setRefreshCookie(res, nextRefreshToken)
 
       return res.json(
@@ -431,7 +434,8 @@ function createAuthRouter({
     const currentRefreshToken = authService.decryptCookieValue(req.cookies?.vault_refresh_token)
 
     if (currentRefreshToken) {
-      await store.revokeRefreshToken(currentRefreshToken)
+      // The session's access tokens stop working now, not when they expire.
+      invalidateSession(await store.revokeRefreshToken(currentRefreshToken))
     }
 
     authService.clearRefreshCookie(res)

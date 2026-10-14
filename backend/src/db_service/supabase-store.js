@@ -387,12 +387,14 @@ class SupabaseStore {
   }
 
   // Refresh tokens
+  // Returns the session id (the row id), which access tokens carry so a
+  // revoked session can be refused immediately.
   async storeRefreshToken({ userId, token, userAgent, ipAddress }) {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
     const nowIso = new Date().toISOString()
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000).toISOString()
 
-    const { error } = await this.client.from('refresh_tokens').insert({
+    const { data, error } = await this.client.from('refresh_tokens').insert({
       token_hash: tokenHash,
       user_id: String(userId),
       revoked_at: null,
@@ -401,7 +403,7 @@ class SupabaseStore {
       user_agent: userAgent ?? null,
       ip_address: ipAddress ?? null,
       last_used_at: nowIso,
-    })
+    }).select('id').single()
 
     if (error) {
       // Same pre-migration fallback: fall back to the original column set so
@@ -414,10 +416,11 @@ class SupabaseStore {
           expires_at: expiresAt,
         })
         if (retryError) throw retryError
-        return
+        return null
       }
       throw error
     }
+    return data?.id ?? null
   }
 
   // Active = not revoked, not expired and not stale. This is the definition the
@@ -501,9 +504,48 @@ class SupabaseStore {
     return (data ?? []).length > 0
   }
 
+  // Swaps the token on the same row, so the session keeps its id (access
+  // tokens issued by other tabs stay valid) and its real sign-in time.
+  // Returns the session id.
   async rotateRefreshToken({ oldToken, newToken, userId, userAgent, ipAddress }) {
+    const hash = (value) => crypto.createHash('sha256').update(value).digest('hex')
+    const { data, error } = await this.client
+      .from('refresh_tokens')
+      .update({
+        token_hash: hash(newToken),
+        expires_at: new Date(Date.now() + REFRESH_TOKEN_TTL_SECONDS * 1000).toISOString(),
+        last_used_at: new Date().toISOString(),
+        user_agent: userAgent ?? null,
+        ip_address: ipAddress ?? null,
+      })
+      .eq('token_hash', hash(oldToken))
+      .eq('user_id', String(userId))
+      .is('revoked_at', null)
+      .select('id')
+
+    if (!error && data?.length) return data[0].id
+
+    // Pre-migration (no session columns) or the row vanished mid-request:
+    // fall back to the original revoke-and-insert.
+    if (error && error.code !== '42703' && error.code !== 'PGRST204') throw error
     await this.revokeRefreshToken(oldToken)
-    await this.storeRefreshToken({ userId, token: newToken, userAgent, ipAddress })
+    return this.storeRefreshToken({ userId, token: newToken, userAgent, ipAddress })
+  }
+
+  // True while the session hasn't been revoked or expired. Without the
+  // session columns (pre-migration) there's nothing to check, so allow.
+  async isSessionActive(sessionId) {
+    const { data, error } = await this.client
+      .from('refresh_tokens')
+      .select('id')
+      .eq('id', String(sessionId))
+      .is('revoked_at', null)
+      .gt('expires_at', new Date().toISOString())
+      .limit(1)
+    if (error?.code === '42703') return true // no session columns yet
+    if (error?.code === '22P02') return false // not a valid session id
+    if (error) throw error
+    return (data ?? []).length > 0
   }
 
   async findValidRefreshToken(token) {
@@ -534,15 +576,18 @@ class SupabaseStore {
     return data?.[0] ?? null
   }
 
+  // Returns the revoked session's id (null if none was live).
   async revokeRefreshToken(token) {
     const tokenHash = crypto.createHash('sha256').update(token).digest('hex')
-    const { error } = await this.client
+    const { data, error } = await this.client
       .from('refresh_tokens')
       .update({ revoked_at: new Date().toISOString() })
       .eq('token_hash', tokenHash)
       .is('revoked_at', null)
+      .select('*')
 
     if (error) throw error
+    return data?.[0]?.id ?? null
   }
 
   // Workspaces

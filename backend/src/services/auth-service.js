@@ -91,10 +91,14 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
 
   const issueCsrfToken = () => crypto.randomBytes(16).toString('hex')
 
-  const issueAccessToken = (user) =>
-    jwt.sign({ sub: user.id, email: user.email, name: user.name }, jwtSecret, {
-      expiresIn: ACCESS_TOKEN_TTL,
-    })
+  // `sessionId` (the refresh-token row) lets the auth middleware refuse the
+  // token as soon as that session is logged out or ended elsewhere.
+  const issueAccessToken = (user, sessionId) =>
+    jwt.sign(
+      { sub: user.id, email: user.email, name: user.name, ...(sessionId ? { sid: String(sessionId) } : {}) },
+      jwtSecret,
+      { expiresIn: ACCESS_TOKEN_TTL },
+    )
 
   // jwtid makes every token unique. Without it, two tokens for the same user
   // in the same second (iat has 1s resolution) are byte-identical and collide
