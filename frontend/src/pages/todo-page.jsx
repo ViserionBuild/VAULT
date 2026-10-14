@@ -15,6 +15,7 @@ import {
   fetchTodoLists,
   fetchTodoTasks,
   restoreTodoList,
+  restoreTodoTask,
   updateTodoList,
   updateTodoTask,
 } from '../services/todo-services'
@@ -367,7 +368,7 @@ export function TodoPage() {
       if (ids.includes(listId)) navigate('/todo')
       await Promise.all(ids.map((id) => deleteTodoList(api, id)))
       toast.show({
-        message: ids.length === 1 ? 'List deleted' : `${ids.length} lists deleted`,
+        message: ids.length === 1 ? 'List moved to Trash' : `${ids.length} lists moved to Trash`,
         action: {
           label: 'Undo',
           onClick: () =>
@@ -443,17 +444,20 @@ export function TodoPage() {
       const task = tasks.find((t) => t.id === taskId)
       setTasks((prev) => prev.filter((t) => t.id !== taskId))
       adjustCounts(listId, { tasks: -1, done: task?.completed ? -1 : 0 })
-      await deleteTodoTask(api, taskId)
+      const result = await deleteTodoTask(api, taskId)
       if (!task) return
-      // Tasks are deleted outright, so Undo re-creates it with the same details.
+      // Tasks go to the Trash, so Undo restores it. Before the Trash migration
+      // they were deleted outright; then Undo re-creates it with its details.
+      const trashed = Boolean(result?.trashed)
       const targetListId = listId
       toast.show({
-        message: 'Task deleted',
+        message: trashed ? 'Task moved to Trash' : 'Task deleted',
         action: {
           label: 'Undo',
           onClick: () =>
             attempt(async () => {
-              await createTodoTask(api, targetListId, {
+              if (trashed) await restoreTodoTask(api, taskId)
+              else await createTodoTask(api, targetListId, {
                 title: task.title,
                 description: task.description ?? '',
                 priority: task.priority ?? 0,

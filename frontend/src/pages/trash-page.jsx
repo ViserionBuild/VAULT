@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Trash2, RotateCcw, RefreshCw, Globe, NotebookPen } from 'lucide-react'
+import { Trash2, RotateCcw, RefreshCw, Globe, NotebookPen, ListTodo, CircleCheck } from 'lucide-react'
 import { useApi } from '../hooks/use-api'
 import { useWorkspace } from '../contexts/workspace-context'
 import { Button } from '../components/ui/button'
@@ -7,11 +7,32 @@ import { Dialog } from '../components/ui/dialog'
 import { useToast } from '../components/ui/toast'
 import { FolderGlyph } from '../components/resources/folder-appearance'
 
-const KIND_LABEL = {
-  resource: { folder: 'Folder', url: 'Link' },
-  note: { folder: 'Notes folder', note: 'Note' },
+// Each kind of deletable thing: its label and where to restore / purge it.
+// `parent` names the trashed item it sits inside, if any.
+const KINDS = {
+  resource: {
+    label: (item) => (item.type === 'folder' ? 'Folder' : 'Link'),
+    path: (item) => `/items/${item.id}`,
+    parent: (item) => item.parentId && `resource:${item.parentId}`,
+  },
+  note: {
+    label: (item) => (item.type === 'folder' ? 'Notes folder' : 'Note'),
+    path: (item) => `/notes/${item.id}`,
+    parent: (item) => item.parentId && `note:${item.parentId}`,
+  },
+  todoList: {
+    label: (item) => `TODO list · ${item.taskCount} task${item.taskCount === 1 ? '' : 's'}`,
+    path: (item) => `/todo/lists/${item.id}`,
+    parent: () => null,
+  },
+  todoTask: {
+    label: (item) => (item.listTitle ? `Task in “${item.listTitle}”` : 'Task'),
+    path: (item) => `/todo/tasks/${item.id}`,
+    parent: (item) => `todoList:${item.listId}`,
+  },
 }
-const basePath = (kind) => (kind === 'note' ? 'notes' : 'items')
+const keyOf = (e) => `${e.kind}:${e.item.id}`
+const parentOf = (e) => KINDS[e.kind].parent(e.item) || null
 
 function formatDeleted(value) {
   if (!value) return ''
@@ -35,10 +56,17 @@ export function TrashPage() {
     setLoading(true)
     setLoadError(false)
     try {
-      const [resources, notes] = await Promise.all([api('/items/trash'), api('/notes/trash')])
+      const [resources, notes, todos] = await Promise.all([
+        api('/items/trash'),
+        api('/notes/trash'),
+        // Optional, so a TODO hiccup doesn't hide the rest of the Trash.
+        api('/todo/trash').catch(() => null),
+      ])
       setEntries([
         ...(resources ?? []).map((item) => ({ kind: 'resource', item })),
         ...(notes ?? []).map((item) => ({ kind: 'note', item })),
+        ...(todos?.lists ?? []).map((item) => ({ kind: 'todoList', item, isFolder: true })),
+        ...(todos?.tasks ?? []).map((item) => ({ kind: 'todoTask', item })),
       ])
     } catch {
       setLoadError(true)
@@ -55,19 +83,19 @@ export function TrashPage() {
 
   // Deleting a folder trashes everything inside it too. Show only the
   // outermost deleted items; restoring a folder brings its contents back.
-  const trashedIds = new Set(entries.map((e) => `${e.kind}:${e.item.id}`))
-  const isNested = (e) => e.item.parentId && trashedIds.has(`${e.kind}:${e.item.parentId}`)
+  const trashedKeys = new Set(entries.map(keyOf))
+  const isNested = (e) => trashedKeys.has(parentOf(e))
   const insideCount = (folder) => {
     let count = 0
-    const walk = (parentId) => {
+    const walk = (key) => {
       for (const e of entries) {
-        if (e.kind === folder.kind && String(e.item.parentId) === String(parentId)) {
+        if (parentOf(e) === key) {
           count += 1
-          if (e.item.type === 'folder') walk(e.item.id)
+          walk(keyOf(e))
         }
       }
     }
-    walk(folder.item.id)
+    walk(keyOf(folder))
     return count
   }
   const visible = entries
@@ -76,25 +104,27 @@ export function TrashPage() {
 
   // Drop an item and everything under it from the list.
   const removeTree = (root) => {
-    const gone = new Set([`${root.kind}:${root.item.id}`])
+    const gone = new Set([keyOf(root)])
     let grew = true
     while (grew) {
       grew = false
       for (const e of entries) {
-        const key = `${e.kind}:${e.item.id}`
-        if (!gone.has(key) && e.item.parentId && gone.has(`${e.kind}:${e.item.parentId}`)) {
-          gone.add(key)
+        if (!gone.has(keyOf(e)) && gone.has(parentOf(e))) {
+          gone.add(keyOf(e))
           grew = true
         }
       }
     }
-    setEntries((prev) => prev.filter((e) => !gone.has(`${e.kind}:${e.item.id}`)))
+    setEntries((prev) => prev.filter((e) => !gone.has(keyOf(e))))
   }
 
   const restore = async (entry) => {
+    // Restoring a task brings back its trashed list too; refetch to show that.
+    const listComesBack = entry.kind === 'todoTask' && trashedKeys.has(parentOf(entry))
     removeTree(entry)
     try {
-      await api(`/${basePath(entry.kind)}/${entry.item.id}/restore`, { method: 'POST' })
+      await api(`${KINDS[entry.kind].path(entry.item)}/restore`, { method: 'POST' })
+      if (listComesBack) fetchTrash()
       toast.success(`Restored “${entry.item.title}”`)
     } catch {
       toast.error('Could not restore. Please try again.')
@@ -106,7 +136,7 @@ export function TrashPage() {
     setConfirm(null)
     removeTree(entry)
     try {
-      await api(`/${basePath(entry.kind)}/${entry.item.id}/purge`, { method: 'DELETE' })
+      await api(`${KINDS[entry.kind].path(entry.item)}/purge`, { method: 'DELETE' })
     } catch {
       toast.error('Could not delete permanently. Please try again.')
       fetchTrash()
@@ -120,7 +150,7 @@ export function TrashPage() {
     const targets = visible
     setEntries([])
     const results = await Promise.allSettled(
-      targets.map((e) => api(`/${basePath(e.kind)}/${e.item.id}/purge`, { method: 'DELETE' })),
+      targets.map((e) => api(`${KINDS[e.kind].path(e.item)}/purge`, { method: 'DELETE' })),
     )
     setEmptying(false)
     if (results.some((r) => r.status === 'rejected')) {
@@ -130,7 +160,7 @@ export function TrashPage() {
   }
 
   const workspaceName = (item) =>
-    activeWorkspace && String(item.workspaceId) !== String(activeWorkspace.id)
+    activeWorkspace && item.workspaceId && String(item.workspaceId) !== String(activeWorkspace.id)
       ? workspaces.find((ws) => String(ws.id) === String(item.workspaceId))?.name
       : null
 
@@ -151,7 +181,7 @@ export function TrashPage() {
             Trash
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Deleted resources and notes. Restore them, or delete them for good.
+            Deleted resources, notes and TODOs. Restore them, or delete them for good.
           </p>
         </div>
         {visible.length > 0 && (
@@ -180,13 +210,14 @@ export function TrashPage() {
             <Trash2 className="h-12 w-12 text-muted-foreground/30" />
           </div>
           <h3 className="text-lg font-semibold">Trash is empty</h3>
-          <p className="mt-1 text-sm text-muted-foreground">Deleted resources and notes will appear here.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Deleted resources, notes and TODOs will appear here.</p>
         </div>
       ) : (
         <div className="space-y-2">
           {visible.map((entry) => {
             const { kind, item } = entry
-            const inside = item.type === 'folder' ? insideCount(entry) : 0
+            const isFolder = item.type === 'folder' || entry.isFolder
+            const inside = isFolder ? insideCount(entry) : 0
             const otherWorkspace = workspaceName(item)
             return (
               <div
@@ -196,6 +227,10 @@ export function TrashPage() {
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-muted/50 opacity-70">
                   {item.type === 'folder' ? (
                     <FolderGlyph icon={item.icon} color={item.color || item.metadata?.color} size="md" />
+                  ) : kind === 'todoList' ? (
+                    <ListTodo className="h-5 w-5 text-muted-foreground/70" strokeWidth={1.5} />
+                  ) : kind === 'todoTask' ? (
+                    <CircleCheck className="h-5 w-5 text-muted-foreground/70" strokeWidth={1.5} />
                   ) : kind === 'note' ? (
                     <NotebookPen className="h-5 w-5 text-muted-foreground/70" strokeWidth={1.5} />
                   ) : (
@@ -206,8 +241,8 @@ export function TrashPage() {
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate text-sm font-medium">{item.title}</h3>
                   <p className="truncate text-xs text-muted-foreground">
-                    {KIND_LABEL[kind][item.type] ?? 'Item'}
-                    {inside > 0 ? ` · includes ${inside} item${inside === 1 ? '' : 's'} inside` : ''}
+                    {KINDS[kind].label(item)}
+                    {inside > 0 ? ` · includes ${inside} deleted item${inside === 1 ? '' : 's'}` : ''}
                     {otherWorkspace ? ` · ${otherWorkspace}` : ''}
                     {item.deletedAt ? ` · deleted ${formatDeleted(item.deletedAt)}` : ''}
                   </p>
@@ -241,8 +276,8 @@ export function TrashPage() {
       >
         <p className="text-sm text-muted-foreground">
           {confirm?.all
-            ? `All ${visible.length} item${visible.length === 1 ? '' : 's'} in the Trash, and everything inside deleted folders, will be gone for good.`
-            : `“${confirm?.entry?.item.title}”${confirm?.entry?.item.type === 'folder' ? ' and everything inside it' : ''} will be gone for good.`}{' '}
+            ? `All ${visible.length} item${visible.length === 1 ? '' : 's'} in the Trash, and everything inside deleted folders and lists, will be gone for good.`
+            : `“${confirm?.entry?.item.title}”${confirm?.entry?.item.type === 'folder' || confirm?.entry?.isFolder ? ' and everything inside it' : ''} will be gone for good.`}{' '}
           This can't be undone.
         </p>
         <div className="mt-5 flex justify-end gap-2">

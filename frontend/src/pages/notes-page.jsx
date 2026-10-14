@@ -11,6 +11,7 @@ import { useItemShortcuts } from '../hooks/use-item-shortcuts'
 import { Button } from '../components/ui/button'
 import { useToast } from '../components/ui/toast'
 import { Breadcrumbs } from '../components/resources/breadcrumbs'
+import { AddMenu } from '../components/items/add-menu'
 import { ContextMenu, useContextMenu } from '../components/ui/context-menu'
 import { MoveDialog } from '../components/resources/move-dialog'
 import { ViewToggle } from '../components/resources/view-toggle'
@@ -415,6 +416,27 @@ export function NotesPage() {
     dnd,
   }
 
+  const addOptions = [
+    {
+      id: 'note',
+      key: 'n',
+      label: 'New note',
+      hint: 'Write something down',
+      icon: NotebookPen,
+      tile: 'from-violet-400 to-fuchsia-500',
+      onSelect: openNewNote,
+    },
+    {
+      id: 'folder',
+      key: 'f',
+      label: 'New folder',
+      hint: 'Group related notes together',
+      icon: FolderPlus,
+      tile: 'from-amber-400 to-orange-500',
+      onSelect: () => openFolderDialog({ mode: 'create' }),
+    },
+  ]
+
   return (
     <section className="space-y-4">
       {/* Header */}
@@ -428,16 +450,12 @@ export function NotesPage() {
           <div className="flex flex-wrap items-center gap-2">
             <ViewToggle activeView={view} onViewChange={setView} views={NOTE_VIEWS} />
             <SortMenu sortBy={sortBy} sortOrder={sortOrder} onChange={changeSort} />
-            <Button size="sm" variant="outline" onClick={() => openFolderDialog({ mode: 'create' })}>
-              <FolderPlus className="mr-1.5 h-4 w-4" />
-              <span className="hidden xs:inline">Folder</span>
-              <span className="xs:hidden">New</span>
-            </Button>
-            <Button size="sm" onClick={openNewNote}>
-              <Plus className="mr-1.5 h-4 w-4" />
-              <span className="hidden xs:inline">Note</span>
-              <span className="xs:hidden">Add</span>
-            </Button>
+            <AddMenu
+              options={addOptions}
+              locationName={breadcrumbs.at(-1)?.title ?? activeWorkspace?.name ?? 'Notes'}
+              disabled={anyDialogOpen || Boolean(contextMenu) || showEditor}
+              hideFab={selectedIds.length > 0 || showEditor}
+            />
           </div>
         </div>
 

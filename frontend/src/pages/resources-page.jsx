@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  FolderPlus, Plus, RefreshCw,
+  FolderPlus, Plus, RefreshCw, Link2, ClipboardPaste,
   Pencil, Trash2, Star, FolderInput, ExternalLink, CheckSquare, Tag
 } from 'lucide-react'
 import { useApi } from '../hooks/use-api'
@@ -17,7 +17,7 @@ import { ResourceCard, ResourcePreviewCard, ResourceListItem, ResourceListHeader
 import { ResourceSearch } from '../components/resources/resource-search'
 import { CreateFolderDialog } from '../components/resources/create-folder-dialog'
 import { AddResourceDialog } from '../components/resources/add-resource-dialog'
-import { AddMenu } from '../components/resources/add-menu'
+import { AddMenu, canReadClipboard } from '../components/items/add-menu'
 import { EditItemDialog } from '../components/resources/edit-item-dialog'
 import { BulkActionBar } from '../components/resources/bulk-action-bar'
 import { MoveDialog } from '../components/resources/move-dialog'
@@ -478,6 +478,36 @@ export function ResourcesPage() {
     },
   ]
 
+  const addOptions = [
+    {
+      id: 'folder',
+      key: 'f',
+      label: 'New folder',
+      hint: 'Group related links together',
+      icon: FolderPlus,
+      tile: 'from-amber-400 to-orange-500',
+      onSelect: () => setShowCreateFolder(true),
+    },
+    {
+      id: 'link',
+      key: 'l',
+      label: 'Add link',
+      hint: 'Save a website by its URL',
+      icon: Link2,
+      tile: 'from-sky-400 to-indigo-500',
+      onSelect: () => openAddResource(),
+    },
+    canReadClipboard && {
+      id: 'paste',
+      key: 'v',
+      label: 'Paste link',
+      hint: 'Add the link on your clipboard',
+      icon: ClipboardPaste,
+      tile: 'from-emerald-400 to-teal-500',
+      onSelect: handlePasteLink,
+    },
+  ].filter(Boolean)
+
   // ─── Render ────────────────────────────────────────────────────
   return (
     <section className="space-y-4" {...dropLinkProps}>
@@ -494,9 +524,8 @@ export function ResourcesPage() {
             <ViewToggle activeView={view} onViewChange={setView} />
             <SortMenu sortBy={sortBy} sortOrder={sortOrder} onChange={changeSort} />
             <AddMenu
-              onNewFolder={() => setShowCreateFolder(true)}
-              onAddLink={() => openAddResource()}
-              onPasteLink={handlePasteLink}
+              options={addOptions}
+              tip="Tip: you can also drop or paste a link anywhere on the page."
               locationName={breadcrumbs.at(-1)?.title ?? activeWorkspace?.name ?? 'Resources'}
               disabled={anyDialogOpen}
               hideFab={selectedIds.length > 0}

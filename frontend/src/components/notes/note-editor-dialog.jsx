@@ -59,10 +59,18 @@ export function NoteEditorDialog({ note, mode = 'edit', onClose, onSave, onSaved
   }
 
   const closeWithSave = useCallback(async () => {
+    // A new note closed without typing anything isn't saved. (Its title
+    // falls back to "Untitled note", so it would otherwise look edited.)
+    const editor = editorRef.current
+    const untouched =
+      !note?.id &&
+      !titleRef.current.trim() &&
+      !editor?.textContent.trim() &&
+      !editor?.querySelector('img, hr, table, input')
     // Never drop a pending edit on the way out.
-    await flush(readCurrent())
+    if (!untouched) await flush(readCurrent())
     onClose()
-  }, [flush, readCurrent, onClose])
+  }, [flush, readCurrent, onClose, note?.id])
 
   // Ctrl/Cmd+S saves now; Escape closes (saving first).
   useEffect(() => {

@@ -186,6 +186,7 @@ function mapTodoTaskRow(row) {
     orderIndex: row.order_index ?? 0,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    deletedAt: row.deleted_at ?? null,
   }
 }
 
@@ -1525,11 +1526,21 @@ class SupabaseStore {
     return mapTodoTaskRow(data)
   }
 
+  // Whether todo_tasks has the Trash columns (migration 20261014). Checked
+  // once; before the migration, tasks are deleted outright as they used to be.
+  async _tasksHaveTrash() {
+    if (this._taskTrashSupported === undefined) {
+      const { error } = await this.client.from('todo_tasks').select('is_deleted').limit(1)
+      if (error && error.code !== '42703') throw error
+      this._taskTrashSupported = !error
+    }
+    return this._taskTrashSupported
+  }
+
   async _getTodoTasksByListId(listId) {
-    const { data, error } = await this.client
-      .from('todo_tasks')
-      .select('*')
-      .eq('list_id', String(listId))
+    let query = this.client.from('todo_tasks').select('*').eq('list_id', String(listId))
+    if (await this._tasksHaveTrash()) query = query.eq('is_deleted', false)
+    const { data, error } = await query
       .order('order_index', { ascending: true })
       .order('created_at', { ascending: true })
 
@@ -1545,11 +1556,9 @@ class SupabaseStore {
   }
 
   async getTodoTaskById(taskId, userId) {
-    const { data, error } = await this.client
-      .from('todo_tasks')
-      .select('*')
-      .eq('id', String(taskId))
-      .limit(1)
+    let query = this.client.from('todo_tasks').select('*').eq('id', String(taskId))
+    if (await this._tasksHaveTrash()) query = query.eq('is_deleted', false)
+    const { data, error } = await query.limit(1)
 
     if (error) throw error
     const task = mapTodoTaskRow(data?.[0])
@@ -1583,14 +1592,135 @@ class SupabaseStore {
     return mapTodoTaskRow(data)
   }
 
+  // Moves the task to the Trash. Returns { trashed } (false when the Trash
+  // columns don't exist yet and it was deleted outright), or null if missing.
   async deleteTodoTask(taskId, userId) {
     const existing = await this.getTodoTaskById(taskId, userId)
-    if (!existing) return false
+    if (!existing) return null
 
-    const { error } = await this.client.from('todo_tasks').delete().eq('id', String(taskId))
+    const trashed = await this._tasksHaveTrash()
+    const nowIso = new Date().toISOString()
+    const { error } = trashed
+      ? await this.client
+          .from('todo_tasks')
+          .update({ is_deleted: true, deleted_at: nowIso, updated_at: nowIso })
+          .eq('id', String(taskId))
+      : await this.client.from('todo_tasks').delete().eq('id', String(taskId))
     if (error) throw error
     await this.updateTodoList(existing.listId, userId, {})
+    return { trashed }
+  }
+
+  // A trashed task owned by the user (through its list, deleted or not).
+  // There's no foreign key to embed the list, so ownership is checked apart.
+  async _getTrashedTodoTask(taskId, userId) {
+    if (!(await this._tasksHaveTrash())) return null
+    const { data, error } = await this.client
+      .from('todo_tasks')
+      .select('*')
+      .eq('id', String(taskId))
+      .eq('is_deleted', true)
+      .limit(1)
+    if (error) throw error
+    const row = data?.[0]
+    if (!row) return null
+    const owner = await this.client
+      .from('todo_lists')
+      .select('id')
+      .eq('id', String(row.list_id))
+      .eq('user_id', String(userId))
+      .limit(1)
+    if (owner.error) throw owner.error
+    return owner.data?.[0] ? row : null
+  }
+
+  // Restoring a task whose list is also in the Trash brings the list back too.
+  async restoreTodoTask(taskId, userId) {
+    const row = await this._getTrashedTodoTask(taskId, userId)
+    if (!row) return null
+    await this.restoreTodoList(row.list_id, userId)
+    const { data, error } = await this.client
+      .from('todo_tasks')
+      .update({ is_deleted: false, deleted_at: null, updated_at: new Date().toISOString() })
+      .eq('id', String(taskId))
+      .select('*')
+      .single()
+    if (error) throw error
+    await this.updateTodoList(row.list_id, userId, {})
+    return mapTodoTaskRow(data)
+  }
+
+  async purgeTodoTask(taskId, userId) {
+    const row = await this._getTrashedTodoTask(taskId, userId)
+    if (!row) return false
+    const { error } = await this.client.from('todo_tasks').delete().eq('id', String(taskId))
+    if (error) throw error
     return true
+  }
+
+  // Deletes a trashed list for good, with all of its tasks.
+  async purgeTodoList(listId, userId) {
+    const { data, error } = await this.client
+      .from('todo_lists')
+      .select('id')
+      .eq('id', String(listId))
+      .eq('user_id', String(userId))
+      .eq('is_deleted', true)
+      .limit(1)
+    if (error) throw error
+    if (!data?.[0]) return false
+
+    const tasks = await this.client.from('todo_tasks').delete().eq('list_id', String(listId))
+    if (tasks.error) throw tasks.error
+    const list = await this.client.from('todo_lists').delete().eq('id', String(listId))
+    if (list.error) throw list.error
+    return true
+  }
+
+  // Trashed lists (with how many tasks they hold) and individually trashed
+  // tasks (with their list's title).
+  async getTodoTrash(userId) {
+    const { data: lists, error } = await this.client
+      .from('todo_lists')
+      .select('*')
+      .eq('user_id', String(userId))
+      .eq('is_deleted', true)
+      .order('deleted_at', { ascending: false })
+    if (error) throw error
+
+    const trashedLists = await Promise.all(
+      (lists ?? []).map(async (row) => {
+        let query = this.client
+          .from('todo_tasks')
+          .select('id', { count: 'exact', head: true })
+          .eq('list_id', String(row.id))
+        if (await this._tasksHaveTrash()) query = query.eq('is_deleted', false)
+        const { count } = await query
+        return mapTodoListRow({ ...row, taskCount: count ?? 0 })
+      }),
+    )
+
+    let tasks = []
+    if (await this._tasksHaveTrash()) {
+      const owned = await this.client.from('todo_lists').select('id, title').eq('user_id', String(userId))
+      if (owned.error) throw owned.error
+      const titles = new Map((owned.data ?? []).map((row) => [String(row.id), row.title]))
+      if (titles.size > 0) {
+        const result = await this.client
+          .from('todo_tasks')
+          .select('*')
+          .eq('is_deleted', true)
+          .in('list_id', [...titles.keys()])
+          .order('deleted_at', { ascending: false })
+        if (result.error) throw result.error
+        tasks = (result.data ?? []).map((row) => ({
+          ...mapTodoTaskRow(row),
+          listTitle: titles.get(String(row.list_id)) ?? '',
+        }))
+      }
+    }
+
+    return { lists: trashedLists, tasks }
   }
 
   // Items
