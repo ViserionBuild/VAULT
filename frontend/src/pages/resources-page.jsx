@@ -104,15 +104,20 @@ export function ResourcesPage() {
   }, [view])
 
   // ─── Actions ───────────────────────────────────────────────────
-  // One-click actions report failure in a toast instead of failing silently.
+  // One-click actions update the list immediately, then confirm with the
+  // server. On failure they report it in a toast and reload the true state.
   // (Dialog actions throw instead, so the dialog can show the error inline.)
   const attempt = async (action, failMessage) => {
     try {
       await action()
     } catch (error) {
       toast.error(error.status === 400 && error.message ? error.message : failMessage)
+      fetchItems()
     }
   }
+
+  const removeLocally = (itemIds) =>
+    setItems((prev) => prev.filter((item) => !itemIds.includes(item.id)))
 
   const handleOpen = (item) => {
     if (item.type === 'folder') {
@@ -183,7 +188,9 @@ export function ResourcesPage() {
   }
 
   const handleEditItem = async (itemId, updates) => {
-    await api(`/items/${itemId}`, { method: 'PUT', body: updates })
+    const updated = await api(`/items/${itemId}`, { method: 'PUT', body: updates })
+    // Show the saved values at once; the refetch keeps sort order right.
+    setItems((prev) => prev.map((item) => (item.id === itemId ? { ...item, ...updated } : item)))
     fetchItems()
   }
 
@@ -204,15 +211,17 @@ export function ResourcesPage() {
 
   const handleDelete = (itemId) =>
     attempt(async () => {
+      removeLocally([itemId])
       await api(`/items/${itemId}`, { method: 'DELETE' })
-      fetchItems()
       offerUndo([itemId])
     }, 'Could not delete. Please try again.')
 
   const handleFavorite = (itemId) =>
     attempt(async () => {
+      setItems((prev) =>
+        prev.map((item) => (item.id === itemId ? { ...item, isFavorite: !item.isFavorite } : item)),
+      )
       await api(`/items/${itemId}/favorite`, { method: 'POST' })
-      fetchItems()
     }, 'Could not update favorite. Please try again.')
 
   const handleRefreshMeta = (itemId) =>
@@ -231,9 +240,9 @@ export function ResourcesPage() {
   const handleBulkDelete = () =>
     attempt(async () => {
       const deletedIds = selectedIds
-      await api('/items/bulk', { method: 'POST', body: { action: 'delete', itemIds: deletedIds } })
+      removeLocally(deletedIds)
       setSelectedIds([])
-      fetchItems()
+      await api('/items/bulk', { method: 'POST', body: { action: 'delete', itemIds: deletedIds } })
       offerUndo(deletedIds)
     }, 'Could not delete the selected items. Please try again.')
 
@@ -243,6 +252,7 @@ export function ResourcesPage() {
       body: { action: 'move', itemIds: moveIds, targetParentId },
     })
     // Moved items have left this folder, so they can't stay selected.
+    if (String(targetParentId ?? '') !== String(currentFolder ?? '')) removeLocally(moveIds)
     setSelectedIds((prev) => prev.filter((id) => !moveIds.includes(id)))
     fetchItems()
   }
