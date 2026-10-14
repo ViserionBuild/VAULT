@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  FolderPlus, Plus, ArrowUpDown, RefreshCw,
-  Pencil, Trash2, Star, FolderInput, ExternalLink, RotateCcw, Tag, CheckSquare
+  FolderPlus, Plus, RefreshCw,
+  Pencil, Trash2, Star, FolderInput, ExternalLink, CheckSquare
 } from 'lucide-react'
 import { useApi } from '../hooks/use-api'
 import { useWorkspace } from '../contexts/workspace-context'
