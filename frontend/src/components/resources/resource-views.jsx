@@ -10,6 +10,34 @@ import {
 import defaultLinkIcon from '../../assets/default_link_icon.png'
 import { Badge } from '../ui/badge'
 
+// Stored URLs may lack a scheme; without one the browser treats them as
+// relative paths on this site.
+const linkHref = (item) => (item.url.startsWith('http') ? item.url : `https://${item.url}`)
+
+/**
+ * Wraps an item's icon. For a link it is a real anchor, so clicking the icon
+ * opens the site and hovering shows the URL in the browser's status bar (plus
+ * middle-click, Cmd/Ctrl+click and long-press menus). Other items get a span.
+ */
+function IconLink({ item, className, children }) {
+  if (item.type !== 'url' || !item.url) {
+    return <span className={className}>{children}</span>
+  }
+  return (
+    <a
+      href={linkHref(item)}
+      target="_blank"
+      rel="noopener noreferrer"
+      // The row/tile also opens on click; stop it so the link opens once.
+      onClick={(e) => e.stopPropagation()}
+      aria-label={`Open ${item.title}`}
+      className={`${className} rounded hover:ring-1 hover:ring-primary/40`}
+    >
+      {children}
+    </a>
+  )
+}
+
 export function ResourceCard({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelect }) {
   const isFolder = item.type === 'folder'
   const folderColor = item.color || item.metadata?.color
@@ -148,7 +176,7 @@ function FileTile({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelec
         onSelect={onSelect}
       />
 
-      <span className="flex h-9 w-9 items-center justify-center">
+      <IconLink item={item} className="flex h-9 w-9 items-center justify-center">
         {item.icon ? (
           item.icon.startsWith('http') ? (
             <img
@@ -165,7 +193,7 @@ function FileTile({ item, onOpen, onContextMenu, onFavorite, isSelected, onSelec
         ) : (
           <Globe className="h-7 w-7 text-muted-foreground/50" strokeWidth={1.5} />
         )}
-      </span>
+      </IconLink>
 
       <span className="line-clamp-2 w-full text-center text-[11px] leading-tight">
         {item.title}
@@ -261,7 +289,7 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
         />
       </span>
 
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center">
+      <IconLink item={item} className="flex h-8 w-8 shrink-0 items-center justify-center">
         {isFolder ? (
           item.icon ? (
             <span className="text-lg" style={folderColor ? { color: folderColor } : {}}>
@@ -284,14 +312,14 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
         ) : (
           <Globe className="h-4 w-4 text-muted-foreground/50" />
         )}
-      </span>
+      </IconLink>
 
       {/* Name column: title, with the domain as secondary text */}
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium">{item.title}</div>
         {item.url ? (
           <a
-            href={item.url.startsWith('http') ? item.url : `https://${item.url}`}
+            href={linkHref(item)}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => e.stopPropagation()}
@@ -443,7 +471,7 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
 
                 <td className="px-3 py-2">
                   <div className="flex items-center gap-2.5">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                    <IconLink item={item} className="flex h-5 w-5 shrink-0 items-center justify-center">
                       {isFolder ? (
                         item.icon ? (
                           <span className="text-base" style={folderColor ? { color: folderColor } : {}}>
@@ -466,7 +494,7 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                       ) : (
                         <Globe className="h-4 w-4 text-muted-foreground/50" />
                       )}
-                    </span>
+                    </IconLink>
                     <span className="truncate font-medium">{item.title}</span>
                   </div>
                 </td>
@@ -474,7 +502,7 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                 <td className="hidden px-3 py-2 text-muted-foreground lg:table-cell">
                   {item.url ? (
                     <a
-                      href={item.url.startsWith('http') ? item.url : `https://${item.url}`}
+                      href={linkHref(item)}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={(e) => e.stopPropagation()}
