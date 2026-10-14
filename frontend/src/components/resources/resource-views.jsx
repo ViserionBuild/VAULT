@@ -278,10 +278,26 @@ export function ResourcePreviewCard({ item, onOpen, onContextMenu, onFavorite, i
   )
 }
 
+// Description column: fixed width, at most three lines tall; longer text
+// scrolls inside the cell. Clicks stay in the cell so scrolling or selecting
+// text doesn't open the item.
+function DescriptionCell({ text }) {
+  if (!text?.trim()) return <span className="text-muted-foreground/40">—</span>
+  return (
+    <div
+      onClick={(e) => e.stopPropagation()}
+      className="max-h-12 cursor-text overflow-y-auto overscroll-contain whitespace-pre-line break-words pr-1 text-xs leading-4 text-muted-foreground [scrollbar-width:thin]"
+    >
+      {text}
+    </div>
+  )
+}
+
 const LIST_COLUMNS = [
   { key: 'title', label: 'Name', className: 'flex-1 min-w-0' },
-  { key: 'type', label: 'Type', className: 'hidden sm:block w-24 shrink-0' },
-  { key: 'updatedAt', label: 'Modified', className: 'hidden md:block w-32 shrink-0' },
+  { key: 'description', label: 'Description', sortable: false, className: 'hidden xl:block w-64 shrink-0' },
+  { key: 'type', label: 'Type', className: 'hidden sm:flex w-24 shrink-0' },
+  { key: 'updatedAt', label: 'Modified', className: 'hidden md:flex w-32 shrink-0' },
 ]
 
 function SortArrow({ active, sortOrder }) {
@@ -317,6 +333,13 @@ export function ResourceListHeader({ onSort, sortBy, sortOrder, allSelected, som
 
       {LIST_COLUMNS.map((col) => {
         const active = sortBy === col.key
+        if (col.sortable === false) {
+          return (
+            <span key={col.key} className={`truncate ${col.className}`}>
+              {col.label}
+            </span>
+          )
+        }
         return (
           <button
             key={col.key}
@@ -404,8 +427,12 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
             {extractDomain(item.url)}
           </a>
         ) : item.description ? (
-          <div className="truncate text-xs text-muted-foreground">{item.description}</div>
+          <div className="truncate text-xs text-muted-foreground xl:hidden">{item.description}</div>
         ) : null}
+      </div>
+
+      <div className="hidden w-64 shrink-0 xl:block">
+        <DescriptionCell text={item.description} />
       </div>
 
 
@@ -450,10 +477,11 @@ export function ResourceListItem({ item, onOpen, onContextMenu, onFavorite, isSe
 
 export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, selectedIds, onSelect, onSort, sortBy, sortOrder, dnd }) {
   const columns = [
-    { key: 'title', label: 'Name', sortable: true, className: 'min-w-[220px]' },
-    { key: 'url', label: 'Location', sortable: false, className: 'hidden lg:table-cell w-56' },
-    { key: 'updatedAt', label: 'Modified', sortable: true, className: 'hidden sm:table-cell w-36' },
-    { key: 'createdAt', label: 'Created', sortable: true, className: 'hidden xl:table-cell w-36' },
+    { key: 'title', label: 'Name', sortable: true, className: 'w-full' },
+    { key: 'description', label: 'Description', sortable: false, className: 'hidden lg:table-cell' },
+    { key: 'url', label: 'Location', sortable: false, className: 'hidden xl:table-cell' },
+    { key: 'updatedAt', label: 'Modified', sortable: true, className: 'hidden sm:table-cell whitespace-nowrap' },
+    { key: 'createdAt', label: 'Created', sortable: true, className: 'hidden 2xl:table-cell whitespace-nowrap' },
   ]
 
   const allSelected = items.length > 0 && selectedIds.length === items.length
@@ -537,8 +565,10 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                   />
                 </td>
 
-                <td className="px-3 py-2">
-                  <div className="flex items-center gap-2.5">
+                {/* max-w-0 with the header's w-full: the name takes the space left
+                    over and truncates instead of pushing the table wider. */}
+                <td className="max-w-0 px-3 py-2">
+                  <div className="flex min-w-[10rem] items-center gap-2.5">
                     <IconLink item={item} className="flex h-5 w-5 shrink-0 items-center justify-center">
                       {isFolder ? (
                         <FolderGlyph icon={item.icon} color={folderColor} size="sm" />
@@ -562,18 +592,26 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                   </div>
                 </td>
 
-                <td className="hidden px-3 py-2 text-muted-foreground lg:table-cell">
+                <td className="hidden px-3 py-2 align-middle lg:table-cell">
+                  <div className="w-60 xl:w-72">
+                    <DescriptionCell text={item.description} />
+                  </div>
+                </td>
+
+                <td className="hidden px-3 py-2 text-muted-foreground xl:table-cell">
                   {item.url ? (
-                    <a
-                      href={linkHref(item)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="inline-flex max-w-full items-center gap-1 truncate hover:text-primary hover:underline"
-                    >
-                      <ExternalLink className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{extractDomain(item.url)}</span>
-                    </a>
+                    <div className="w-44">
+                      <a
+                        href={linkHref(item)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex max-w-full items-center gap-1 truncate hover:text-primary hover:underline"
+                      >
+                        <ExternalLink className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{extractDomain(item.url)}</span>
+                      </a>
+                    </div>
                   ) : (
                     <span className="text-muted-foreground/50">—</span>
                   )}
@@ -583,7 +621,7 @@ export function ResourceTable({ items, onOpen, onContextMenu, onFavorite, select
                   {formatDate(item.updatedAt)}
                 </td>
 
-                <td className="hidden whitespace-nowrap px-3 py-2 text-muted-foreground xl:table-cell">
+                <td className="hidden whitespace-nowrap px-3 py-2 text-muted-foreground 2xl:table-cell">
                   {formatDate(item.createdAt)}
                 </td>
 
