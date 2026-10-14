@@ -11,7 +11,7 @@ import { useAuth } from '../../contexts/auth-context'
 import { useWorkspace } from '../../contexts/workspace-context'
 import { useProfile } from '../../contexts/profile-context'
 import { Avatar } from '../ui/avatar'
-import vaultIcon from '../../assets/bank-vault-16.png'
+import vaultIcon from '../../assets/vault-logo.webp'
 
 const navItems = [
   { label: 'Dashboard', path: '/', icon: Home },
