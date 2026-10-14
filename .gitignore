@@ -4,4 +4,5 @@ frontend/.vite
 frontend/.env
 backend/node_modules
 backend/.env
-supabase/
+# Local Supabase SQL-editor scratch; migrations and config are tracked.
+supabase/snippets/
