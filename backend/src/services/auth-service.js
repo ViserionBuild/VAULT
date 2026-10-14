@@ -96,9 +96,13 @@ function createAuthService({ jwtSecret, refreshTokenSecret, cookieEncryptionSecr
       expiresIn: ACCESS_TOKEN_TTL,
     })
 
+  // jwtid makes every token unique. Without it, two tokens for the same user
+  // in the same second (iat has 1s resolution) are byte-identical and collide
+  // on refresh_tokens.token_hash, failing the login or rotation.
   const issueRefreshToken = (user) =>
     jwt.sign({ sub: user.id, tokenType: 'refresh' }, refreshTokenSecret, {
       expiresIn: REFRESH_TOKEN_TTL_SECONDS,
+      jwtid: crypto.randomUUID(),
     })
 
   const verifyRefreshToken = (token) => jwt.verify(token, refreshTokenSecret)

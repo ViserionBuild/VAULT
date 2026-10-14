@@ -30,7 +30,11 @@ function createApp(options = {}) {
     .map((origin) => origin.trim())
     .filter(Boolean)
 
-  app.set('trust proxy', 1)
+  // Proxy hops in front of Express. 1 = Render's load balancer. When the
+  // frontend proxies /api through Vercel (first-party cookies), set
+  // TRUST_PROXY_HOPS=2 so req.ip, and with it the rate limiter, sees the real
+  // client instead of Vercel's egress IP.
+  app.set('trust proxy', Number(process.env.TRUST_PROXY_HOPS) || 1)
   app.use(helmet())
   app.use(
     cors({
